@@ -225,6 +225,30 @@ export class GAPDefinitionResolver {
         return null;
     }
 
+    /** Resolve a top-level symbol anywhere in the current workspace. */
+    resolveWorkspaceDefinition(
+        document: vscode.TextDocument,
+        name: string,
+    ): ResolvedDefinition | null {
+        const baseDir = resolveReadBaseDir(document);
+        if (!baseDir) return null;
+        const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
+        const candidate = this.scanWorkspaceSymbolDefinitionsCached(
+            baseDir,
+            name,
+            currentFilePath,
+        )[0];
+        return candidate ? this.toDefinition({
+            lines: candidate.lines,
+            row: candidate.event.row,
+            column: candidate.event.column,
+            filePath: candidate.filePath,
+            headerText: candidate.event.headerText,
+            name: candidate.event.name,
+            symbolKind: candidate.event.symbolKind,
+        }) : null;
+    }
+
     /** Resolve all static declaration/installation locations for a GAP symbol. */
     resolveDefinitions(
         document: vscode.TextDocument,

@@ -183,7 +183,17 @@ async function main() {
             (await hoverAt(provider, doc, 'parameter;')).contents.value.includes('**parameter**'));
         check('user function shows function type', true,
             (await hoverAt(provider, doc, 'typed :=')).contents.value.includes('**function**'));
-        check('keyword does not hover', true, (await hoverAt(provider, doc, 'return')) === undefined);
+        check('keyword shows its syntax role', true,
+            textOf(await hoverAt(provider, doc, 'return')).includes('**control keyword**'));
+        const conditional = makeDocument(
+            'conditional.g',
+            'if not IsBound(value) then\n  return value;\nfi;\n',
+            null,
+        );
+        check('if keyword hovers', true, textOf(await hoverAt(provider, conditional, 'if ')).includes('conditional block'));
+        check('not keyword hovers', true, textOf(await hoverAt(provider, conditional, 'not ')).includes('Negates'));
+        check('then keyword hovers', true, textOf(await hoverAt(provider, conditional, 'then')).includes('conditional branch'));
+        check('fi keyword hovers', true, textOf(await hoverAt(provider, conditional, 'fi;')).includes('Ends a conditional'));
         // A position right after the name still hovers.
         check('definition name at word end still hovers', true, provider.provideHover(doc, { line: 0, character: 4 }, new CancellationTokenStub()) !== undefined);
     }
@@ -459,6 +469,21 @@ async function main() {
         const futureHover = await hoverAt(provider, futureDoc, 'FutureValue');
         check('IsBound guard resolves a future Read definition', true,
             textOf(futureHover).includes('**variable**'));
+
+        fs.writeFileSync(path.join(tmp, 'dynamic-loader.g'), [
+            'if not IsBound(CrossFileValue) then',
+            '  Read(Concatenation(directory, "dynamic-def.g"));',
+            'fi;',
+        ].join('\n'));
+        fs.writeFileSync(path.join(tmp, 'dynamic-def.g'), 'CrossFileValue := rec();\n');
+        const dynamicDoc = makeDocument(
+            'dynamic-loader.g',
+            fs.readFileSync(path.join(tmp, 'dynamic-loader.g'), 'utf8'),
+            tmp,
+        );
+        const dynamicHover = await hoverAt(provider, dynamicDoc, 'CrossFileValue');
+        check('IsBound guard finds a cross-file definition for a dynamic Read', true,
+            textOf(dynamicHover).includes('**variable**'));
         workspaceState.textDocuments.length = 0;
     } finally {
         workspaceState.folderPath = null;

@@ -22,6 +22,56 @@ const FALLBACK_TEXT =
     '- name := x -> ...\n' +
     '- name := {x, y, ...} -> ...';
 
+const KEYWORD_DESCRIPTIONS: Readonly<Record<string, { type: string; description: string }>> = {
+    if: { type: 'conditional keyword', description: 'Starts a conditional block.' },
+    then: { type: 'conditional keyword', description: 'Starts the body of a conditional branch.' },
+    elif: { type: 'conditional keyword', description: 'Adds another condition to a conditional block.' },
+    else: { type: 'conditional keyword', description: 'Starts the fallback branch of a conditional block.' },
+    fi: { type: 'conditional keyword', description: 'Ends a conditional block.' },
+    not: { type: 'logical operator', description: 'Negates a boolean condition.' },
+    and: { type: 'logical operator', description: 'Requires both boolean conditions to be true.' },
+    or: { type: 'logical operator', description: 'Requires at least one boolean condition to be true.' },
+    in: { type: 'operator keyword', description: 'Tests membership or introduces a loop collection.' },
+    mod: { type: 'operator keyword', description: 'Computes the remainder after integer division.' },
+    function: { type: 'function keyword', description: 'Starts a function expression.' },
+    local: { type: 'function keyword', description: 'Declares names local to the current function.' },
+    end: { type: 'function keyword', description: 'Ends a function expression.' },
+    return: { type: 'control keyword', description: 'Returns a value from the current function.' },
+    for: { type: 'loop keyword', description: 'Starts a loop over a collection.' },
+    while: { type: 'loop keyword', description: 'Starts a loop controlled by a condition.' },
+    do: { type: 'loop keyword', description: 'Starts the body of a loop.' },
+    od: { type: 'loop keyword', description: 'Ends a for or while loop.' },
+    repeat: { type: 'loop keyword', description: 'Starts a loop whose condition is checked at the end.' },
+    until: { type: 'loop keyword', description: 'Ends a repeat loop when its condition becomes true.' },
+    break: { type: 'control keyword', description: 'Stops the nearest enclosing loop.' },
+    continue: { type: 'control keyword', description: 'Continues with the next iteration of the nearest loop.' },
+    rec: { type: 'type keyword', description: 'Creates a record value.' },
+    atomic: { type: 'modifier keyword', description: 'Marks an atomic function or statement.' },
+    readonly: { type: 'modifier keyword', description: 'Marks an atomic function parameter as read-only.' },
+    readwrite: { type: 'modifier keyword', description: 'Marks an atomic function parameter as readable and writable.' },
+    quit: { type: 'control keyword', description: 'Exits the current session.' },
+};
+
+function keywordNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
+    const candidates = [
+        root.descendantForIndex(clamped),
+        root.descendantForIndex(Math.max(0, clamped - 1)),
+    ];
+    for (const node of candidates) {
+        if (node && KEYWORD_DESCRIPTIONS[node.text]) return node;
+    }
+    return null;
+}
+
+function keywordMarkdown(keyword: string): vscode.MarkdownString {
+    const info = KEYWORD_DESCRIPTIONS[keyword];
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${info.type}**\n\n`);
+    md.appendMarkdown(`\`${keyword}\`\n\n${info.description}`);
+    return md;
+}
+
 /**
  * Render the hover for a GAP function.
  * Shows the function title and a link into GAP Help.
@@ -199,7 +249,12 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         if (token.isCancellationRequested) return undefined;
         const tree = getDocumentTree(document);
         const node = symbolNameNodeAt(tree.rootNode, offset);
-        if (!node) return undefined;
+        if (!node) {
+            const keyword = keywordNodeAt(tree.rootNode, offset);
+            return keyword
+                ? new vscode.Hover(keywordMarkdown(keyword.text), this.rangeOf(document, keyword))
+                : undefined;
+        }
 
         const name = symbolLookupName(node);
 
@@ -215,6 +270,9 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         // A loader may use a symbol in an IsBound guard before Read() loads its definition.
         if (!resolved && isIsBoundArgument(node)) {
             resolved = this.resolver.resolveDefinitionFromFutureReads(document, position, name);
+            if (!resolved) {
+                resolved = this.resolver.resolveWorkspaceDefinition(document, name);
+            }
         }
         if (resolved) {
             return new vscode.Hover(
