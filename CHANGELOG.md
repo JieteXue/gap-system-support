@@ -7,6 +7,7 @@
 5. Add Hover information for GAP symbol categories, language keywords, and built-in functions
 6. Resolve guarded symbols across cross-file and dynamic `Read(...)` loaders
 7. Cache Hover help lookups and documentation summaries
+8. Show concise Hover descriptions for assignment, function, comparison, arithmetic, power, range, and variadic operators
 
 ## 0.3.5
 

@@ -131,6 +131,16 @@ function hoverAt(provider, doc, needle, occurrence = 0) {
     );
 }
 
+/** Return the provider hover at an offset inside `needle`. */
+function hoverInside(provider, doc, needle, offset) {
+    const position = positionOf(doc.getText(), needle);
+    return provider.provideHover(
+        doc,
+        { line: position.line, character: position.character + offset },
+        new CancellationTokenStub(),
+    );
+}
+
 /** Return the hover text contents, or undefined. */
 function textOf(hover) {
     return hover && hover.contents ? hover.contents.value : undefined;
@@ -197,6 +207,48 @@ async function main() {
         check('fi keyword hovers', true, textOf(await hoverAt(provider, conditional, 'fi;')).includes('Ends a conditional'));
         check('fail literal hovers', true,
             textOf(await hoverAt(provider, doc, 'fail;')).includes('**built-in constant**'));
+
+        const operatorCode = [
+            'assigned := 1;',
+            'lambda := x -> x;',
+            'equal := assigned = 1;',
+            'different := assigned <> 2;',
+            'less := 1 < 2;',
+            'lessEqual := 1 <= 2;',
+            'greater := 2 > 1;',
+            'greaterEqual := 2 >= 1;',
+            'sum := 1 + 2;',
+            'difference := 2 - 1;',
+            'product := 2 * 3;',
+            'quotient := 6 / 2;',
+            'power := 2 ^ 3;',
+            'range := [1 .. 3];',
+            'variadic := function(head, tail...)',
+            '  return tail;',
+            'end;',
+        ].join('\n');
+        const operatorDoc = makeDocument('operators.g', operatorCode, null);
+        const operatorCases = [
+            [':=', 'assignment operator', 0],
+            ['->', 'function operator', 0],
+            [' = ', 'comparison operator', 1],
+            ['<>', 'comparison operator', 0],
+            [' < ', 'comparison operator', 1],
+            ['<=', 'comparison operator', 0],
+            [' > ', 'comparison operator', 1],
+            ['>=', 'comparison operator', 0],
+            [' + ', 'arithmetic operator', 1],
+            [' - ', 'arithmetic operator', 1],
+            [' * ', 'arithmetic operator', 1],
+            [' / ', 'arithmetic operator', 1],
+            [' ^ ', 'power operator', 1],
+            ['..', 'range operator', 0],
+            ['...', 'variadic marker', 0],
+        ];
+        for (const [operator, type, offset] of operatorCases) {
+            check(`${operator.trim()} operator hovers`, true,
+                textOf(await hoverInside(provider, operatorDoc, operator, offset)).includes(`**${type}**`));
+        }
         // A position right after the name still hovers.
         check('definition name at word end still hovers', true, provider.provideHover(doc, { line: 0, character: 4 }, new CancellationTokenStub()) !== undefined);
     }

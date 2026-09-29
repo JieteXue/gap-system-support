@@ -45,6 +45,13 @@ includes conditional keywords such as `if`, `then`, `elif`, `else`, and `fi`,
 logical operators such as `not`, `and`, and `or`, and loop/function keywords
 such as `for`, `while`, `repeat`, `function`, and `return`.
 
+Symbolic operators are covered as well:
+
+- assignment and function construction: `:=`, `->`;
+- comparison: `=`, `<>`, `<`, `<=`, `>`, `>=`;
+- arithmetic and power: `+`, `-`, `*`, `/`, `^`;
+- ranges and variadic parameters: `..`, `...`.
+
 These descriptions are intentionally short and are not a replacement for the
 GAP language reference.
 

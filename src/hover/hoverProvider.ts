@@ -61,6 +61,24 @@ const LITERAL_DESCRIPTIONS: Readonly<Record<string, string>> = {
     fail: 'Represents failure when an operation cannot produce a normal result.',
 };
 
+const OPERATOR_DESCRIPTIONS: Readonly<Record<string, { type: string; description: string }>> = {
+    ':=': { type: 'assignment operator', description: 'Assigns the value on the right to the name or component on the left.' },
+    '->': { type: 'function operator', description: 'Creates a function from the parameter or parameter list on the left and the expression on the right.' },
+    '=': { type: 'comparison operator', description: 'Tests whether two values are equal.' },
+    '<>': { type: 'comparison operator', description: 'Tests whether two values are not equal.' },
+    '<': { type: 'comparison operator', description: 'Tests whether the left value is less than the right value.' },
+    '<=': { type: 'comparison operator', description: 'Tests whether the left value is less than or equal to the right value.' },
+    '>': { type: 'comparison operator', description: 'Tests whether the left value is greater than the right value.' },
+    '>=': { type: 'comparison operator', description: 'Tests whether the left value is greater than or equal to the right value.' },
+    '+': { type: 'arithmetic operator', description: 'Adds two values, or applies unary positive when used with one operand.' },
+    '-': { type: 'arithmetic operator', description: 'Subtracts the right value, or applies additive inverse when used with one operand.' },
+    '*': { type: 'arithmetic operator', description: 'Multiplies two values.' },
+    '/': { type: 'arithmetic operator', description: 'Computes the quotient of two values.' },
+    '^': { type: 'power operator', description: 'Applies exponentiation, conjugation, or another supported power operation.' },
+    '..': { type: 'range operator', description: 'Builds a range between values, optionally using a preceding step value.' },
+    '...': { type: 'variadic marker', description: 'Marks the final function parameter as accepting the remaining arguments.' },
+};
+
 function syntaxNodeAt(root: SyntaxNode, offset: number): SyntaxNode[] {
     const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
     return [
@@ -81,6 +99,12 @@ function literalNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
         if (node && LITERAL_DESCRIPTIONS[node.text]) return node;
     }
     return null;
+}
+
+function operatorNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
+    const node = root.descendantForIndex(clamped);
+    return node && OPERATOR_DESCRIPTIONS[node.text] ? node : null;
 }
 
 function selectorExpression(node: SyntaxNode): SyntaxNode {
@@ -131,6 +155,14 @@ function literalMarkdown(literal: string): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown('**built-in constant**\n\n');
     md.appendMarkdown(`\`${literal}\`\n\n${LITERAL_DESCRIPTIONS[literal]}`);
+    return md;
+}
+
+function operatorMarkdown(operator: string): vscode.MarkdownString {
+    const info = OPERATOR_DESCRIPTIONS[operator];
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${info.type}**\n\n`);
+    md.appendMarkdown(`\`${operator}\`\n\n${info.description}`);
     return md;
 }
 
@@ -339,6 +371,10 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         const offset = document.offsetAt(position);
         if (token.isCancellationRequested) return undefined;
         const tree = getDocumentTree(document);
+        const operator = operatorNodeAt(tree.rootNode, offset);
+        if (operator) {
+            return new vscode.Hover(operatorMarkdown(operator.text), this.rangeOf(document, operator));
+        }
         const node = hoverSymbolNodeAt(tree.rootNode, offset);
         if (!node) {
             const keyword = keywordNodeAt(tree.rootNode, offset);
@@ -346,9 +382,10 @@ export class GAPHoverProvider implements vscode.HoverProvider {
                 return new vscode.Hover(keywordMarkdown(keyword.text), this.rangeOf(document, keyword));
             }
             const literal = literalNodeAt(tree.rootNode, offset);
-            return literal
-                ? new vscode.Hover(literalMarkdown(literal.text), this.rangeOf(document, literal))
-                : undefined;
+            if (literal) {
+                return new vscode.Hover(literalMarkdown(literal.text), this.rangeOf(document, literal));
+            }
+            return undefined;
         }
 
         const name = hoverLookupName(node);

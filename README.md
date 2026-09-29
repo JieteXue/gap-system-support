@@ -12,7 +12,7 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
 
 - **Semantic highlighting and syntax diagnostics**: based on `tree-sitter-gap`.
 - **Code completion**: provides completion for GAP constants, keywords, statement structures, and GAP functions (including functions from other GAP files loaded via `Read`).
-- **Hover information**: hovering over a symbol shows its static category, such as `function`, `variable`, `parameter`, or `record field`. Built-in functions show their signature, a short documentation summary when the GAP documentation is configured, and a link to GAP Help. GAP language keywords such as `if`, `not`, `then`, and `fi` show concise syntax descriptions.
+- **Hover information**: hovering over a symbol shows its static category, such as `function`, `variable`, `parameter`, or `record field`. Built-in functions show their signature, a short documentation summary when the GAP documentation is configured, and a link to GAP Help. Language keywords and operators such as `if`, `not`, `:=`, `<>`, and `->` show concise syntax descriptions.
 - **Definition navigation**: native Go to Definition and Peek Definition support for statically recognizable user-defined GAP symbols.
 - **Reference navigation**: `Command+click` a definition with references to open the native Peek view, or use native Find All References (`Shift+F12`). The selected occurrence is omitted; definitions without references jump directly to themselves.
 - **Running GAP code**: runs the current GAP file in the VS Code integrated terminal, with configurable GAP command line options.
