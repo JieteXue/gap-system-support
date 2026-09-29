@@ -4,23 +4,60 @@ import type { SyntaxNode } from 'web-tree-sitter';
 
 const DECLARATION_CALLS = new Set([
     'DeclareGlobalFunction',
+    'DeclareGlobalName',
+    'DeclareGlobalVariable',
     'DeclareOperation',
     'DeclareAttribute',
     'DeclareProperty',
     'DeclareCategory',
+    'DeclareFilter',
     'DeclareRepresentation',
+    'DeclareSynonym',
+    'DeclareSynonymAttr',
+    'DeclareTagBasedOperation',
+    'DeclareConstructor',
+    'DeclareDataType',
+    'DeclareInfoClass',
+    'DeclareHasAndSet',
+    'DeclareObsoleteSynonym',
+    'DeclareObsoleteSynonymAttr',
+    'DeclareOperationWithCache',
+    'DeclareAttributeWithCustomGetter',
+    'DeclareAttributeThatReturnsDigraph',
 ]);
 
 const IMPLEMENTATION_CALLS = new Set([
     'InstallGlobalFunction',
     'InstallMethod',
+    'InstallOtherMethod',
+    'InstallEarlyMethod',
+    'InstallImmediateMethod',
+    'InstallTrueMethod',
+    'InstallTagBasedMethod',
+    'InstallValue',
     'BindGlobal',
+    'BindConstant',
+    'BindThreadLocal',
+    'BindThreadLocalConstructor',
 ]);
 
 const STRING_NAME_CALLS = new Set([
     ...DECLARATION_CALLS,
     'BindGlobal',
+    'BindConstant',
+    'BindThreadLocalConstructor',
 ]);
+
+function isDeclarationCall(name: string): boolean {
+    return DECLARATION_CALLS.has(name) ||
+        /^(?:DeclareOperation|DeclareAttribute|DeclareProperty|DeclareCategory|DeclareRepresentation|DeclareConstructor)Kernel$/.test(name) ||
+        /^(?:DeclareAttribute|DeclareProperty)SuppCT$/.test(name);
+}
+
+function isImplementationCall(name: string): boolean {
+    return IMPLEMENTATION_CALLS.has(name) ||
+        /^Install(?:Other)?Method(?:With.*|ForCompilerForCAP|ThatReturnsDigraph)?$/.test(name);
+}
 
 /**
  * Return the name node when the cursor is on a function or GAP symbol name.
@@ -63,7 +100,7 @@ export function functionNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode
         if (call?.type === 'call' &&
             functionNode?.type === 'identifier' &&
             firstArgument?.id === node.id &&
-            IMPLEMENTATION_CALLS.has(functionNode.text)) {
+            isImplementationCall(functionNode.text)) {
             return node;
         }
     }
@@ -103,7 +140,7 @@ function declarationStringNodeAt(root: SyntaxNode, offset: number): SyntaxNode |
     const firstArgument = argumentsNode.namedChildren[0];
     if (functionNode?.type !== 'identifier' ||
         firstArgument?.id !== stringNode.id ||
-        !STRING_NAME_CALLS.has(functionNode.text)) {
+        !isDeclarationCall(functionNode.text) && !STRING_NAME_CALLS.has(functionNode.text)) {
         return null;
     }
     return node;
@@ -114,4 +151,15 @@ export function symbolNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode |
     const identifier = identifierNodeAt(root, offset);
     if (identifier) return identifier;
     return declarationStringNodeAt(root, offset);
+}
+
+/** Return the lookup key for a symbol, preserving record/component paths. */
+export function symbolLookupName(node: SyntaxNode): string {
+    const parent = node.parent;
+    if (parent &&
+        (parent.type === 'record_selector' || parent.type === 'component_selector') &&
+        parent.childForFieldName('selector')?.id === node.id) {
+        return parent.text;
+    }
+    return node.text;
 }

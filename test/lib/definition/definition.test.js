@@ -373,7 +373,71 @@ async function main() {
         }
     }
 
-    section('12. Custom variables and lexical scope');
+    section('12. GAP declaration and installation families');
+    {
+        const code = [
+            'DeclareGlobalVariable("declaredVariable");',
+            'DeclareGlobalName("declaredName");',
+            'DeclareFilter("declaredFilter", 1);',
+            'DeclareInfoClass("declaredInfo");',
+            'DeclareSynonym("declaredAlias", declaredVariable);',
+            'BindConstant("boundConstant", 1);',
+            'BindThreadLocal(declaredVariable, 2);',
+            'BindThreadLocalConstructor("threadLocalValue", function() return [true, 3]; end);',
+            'InstallValue(declaredVariable, rec());',
+            'InstallOtherMethod(declaredVariable, [IsObject], function(x) return x; end);',
+            'InstallImmediateMethod(declaredFilter, [IsObject], function(x) return x; end);',
+            'Operations := rec(Run := declaredVariable);',
+            'InstallOtherMethod(Operations.Run, [IsObject], function(x) return x; end);',
+            'declaredVariable;',
+            'declaredName;',
+            'declaredFilter;',
+            'declaredInfo;',
+            'declaredAlias;',
+            'boundConstant;',
+            'threadLocalValue;',
+            'Operations.Run(1);',
+            'DeclareAutoreadableVariables("PackageName", "read.g", ["AutoName"]);',
+        ].join('\n');
+        const doc = makeDocument('declaration-families.g', code, null);
+
+        check('DeclareGlobalVariable string resolves', true,
+            defineAt(provider, doc, 'declaredVariable', 0) !== undefined);
+        check('DeclareGlobalName string resolves', true,
+            defineAt(provider, doc, 'declaredName', 0) !== undefined);
+        check('DeclareFilter string resolves', true,
+            defineAt(provider, doc, 'declaredFilter', 0) !== undefined);
+        check('DeclareInfoClass string resolves', true,
+            defineAt(provider, doc, 'declaredInfo', 0) !== undefined);
+        check('DeclareSynonym string resolves', true,
+            defineAt(provider, doc, 'declaredAlias', 0) !== undefined);
+        check('BindConstant string resolves', true,
+            defineAt(provider, doc, 'boundConstant', 0) !== undefined);
+        check('BindThreadLocalConstructor string resolves', true,
+            defineAt(provider, doc, 'threadLocalValue', 0) !== undefined);
+        const installedValue = provider.provideDefinition(
+            doc,
+            positionOf(code, 'declaredVariable', 3),
+            new CancellationTokenStub(),
+        );
+        check('InstallValue target is indexed as an implementation', true,
+            Array.isArray(installedValue) &&
+            installedValue.some(location => location.range.start.line === 8));
+        check('InstallOtherMethod target resolves', true,
+            defineAt(provider, doc, 'declaredVariable', 4) !== undefined);
+        const dottedMethod = provider.provideDefinition(
+            doc,
+            positionOf(code, 'Run(1)'),
+            new CancellationTokenStub(),
+        );
+        check('dotted method installation keeps the complete target path', true,
+            Array.isArray(dottedMethod) &&
+            dottedMethod.some(location => location.range.start.line === 12));
+        check('non-symbol Declare API is not treated as a declaration', true,
+            defineAt(provider, doc, 'PackageName', 0) === undefined);
+    }
+
+    section('13. Custom variables and lexical scope');
     {
         const code = [
             'globalValue := 1;',
@@ -428,6 +492,47 @@ async function main() {
         const dottedAssignmentDoc = makeDocument('dotted-assignment.g', dottedAssignmentCode, null);
         check('dotted record assignment resolves to its definition', 1,
             defineAt(provider, dottedAssignmentDoc, 'Block(', 0).range.start.line);
+
+        const componentCode = [
+            'internal := rec();',
+            'internal!.cache := 1;',
+            'value := internal!.cache;',
+        ].join('\n');
+        const componentDoc = makeDocument('component.g', componentCode, null);
+        check('component selector resolves to its assignment', 1,
+            defineAt(provider, componentDoc, 'cache;', 0).range.start.line);
+
+        const duplicateFieldCode = [
+            'A := rec(Print := 1);',
+            'B := rec(Print := 2);',
+            'A.Print;',
+            'B.Print;',
+        ].join('\n');
+        const duplicateFieldDoc = makeDocument('duplicate-fields.g', duplicateFieldCode, null);
+        check('record field lookup uses the complete path for A', 0,
+            defineAt(provider, duplicateFieldDoc, 'Print;', 0).range.start.line);
+        check('record field lookup uses the complete path for B', 1,
+            defineAt(provider, duplicateFieldDoc, 'Print;', 1).range.start.line);
+
+        const parameterCode = [
+            'variadic := function(arg...)',
+            '    return arg;',
+            'end;',
+            'atomicFn := atomic function(readonly input, readwrite output, rest...)',
+            '    before := output;',
+            '    output := input;',
+            '    return [output, rest];',
+            'end;',
+        ].join('\n');
+        const parameterDoc = makeDocument('parameters.g', parameterCode, null);
+        check('variadic function parameter resolves', 0,
+            defineAt(provider, parameterDoc, 'arg;', 0).range.start.line);
+        check('readonly atomic parameter resolves', 3,
+            defineAt(provider, parameterDoc, 'input;', 0).range.start.line);
+        check('readwrite atomic parameter resolves', 3,
+            defineAt(provider, parameterDoc, 'output;', 0).range.start.line);
+        check('variadic atomic parameter resolves', 3,
+            defineAt(provider, parameterDoc, 'rest];', 0).range.start.line);
 
         const shadowCode = [
             'value := 1;',

@@ -410,6 +410,7 @@ export class GAPDefinitionResolver {
                 node: SyntaxNode;
                 keep: boolean;
                 symbolKind: 'parameter' | 'variable' | 'function';
+                lookupName?: string;
             }
         >();
         const kindPriority = { variable: 1, parameter: 2, function: 3 } as const;
@@ -451,6 +452,28 @@ export class GAPDefinitionResolver {
 
         // Record fields are definitions too. They are intentionally collected
         // from the AST because completion.scm only models lexical variables.
+        const assignedRecordRoot = (node: SyntaxNode): string | null => {
+            let current: SyntaxNode | null = node;
+            const fields: string[] = [];
+            while (current && current.type !== 'source_file') {
+                if (current.type === 'record_entry') {
+                    const left = current.childForFieldName('left');
+                    if (left?.type !== 'identifier') return null;
+                    fields.unshift(left.text);
+                }
+                if (current.type === 'assignment_statement') {
+                    const left = current.childForFieldName('left');
+                    if (!left || (left.type !== 'identifier' &&
+                        left.type !== 'record_selector' &&
+                        left.type !== 'component_selector')) {
+                        return null;
+                    }
+                    return [left.text, ...fields].join('.');
+                }
+                current = current.parent;
+            }
+            return null;
+        };
         const collectRecordFields = (node: SyntaxNode): void => {
             if (node.type === 'record_entry') {
                 const left = node.childForFieldName('left');
@@ -462,13 +485,14 @@ export class GAPDefinitionResolver {
                             node: left,
                             keep: !topLevelOnly || isTopLevel(left),
                             symbolKind: 'variable',
+                            lookupName: assignedRecordRoot(node) ?? left.text,
                         });
                     }
                 }
             }
             if (node.type === 'assignment_statement') {
                 const left = node.childForFieldName('left');
-                const selector = left?.type === 'record_selector'
+                const selector = left?.type === 'record_selector' || left?.type === 'component_selector'
                     ? left.childForFieldName('selector')
                     : null;
                 if (selector?.type === 'identifier' && !hasErrorAncestor(selector)) {
@@ -479,6 +503,7 @@ export class GAPDefinitionResolver {
                             node: selector,
                             keep: !topLevelOnly || isTopLevel(selector),
                             symbolKind: 'variable',
+                            lookupName: left!.text,
                         });
                     }
                 }
@@ -488,7 +513,7 @@ export class GAPDefinitionResolver {
         collectRecordFields(rootNode);
 
         // Attach every definition to its innermost enclosing scope, as scoped.ts does.
-        for (const { node, keep, symbolKind } of defNodes.values()) {
+        for (const { node, keep, symbolKind, lookupName } of defNodes.values()) {
             if (!keep) continue;
             let scope = GLOBAL_SCOPE;
             let current: SyntaxNode | null = node.parent;
@@ -501,7 +526,7 @@ export class GAPDefinitionResolver {
             }
             events.push({
                 kind: 'def',
-                name: node.text,
+                name: lookupName ?? node.text,
                 offset: node.startIndex,
                 end: node.endIndex,
                 scope,
@@ -521,17 +546,48 @@ export class GAPDefinitionResolver {
         const events: Extract<FileEvent, { kind: 'def' }>[] = [];
         const declarations = new Map<string, Extract<FileEvent, { kind: 'def' }>['symbolKind']>([
             ['DeclareGlobalFunction', 'global-function'],
+            ['DeclareGlobalName', 'global'],
+            ['DeclareGlobalVariable', 'global'],
             ['DeclareOperation', 'operation'],
             ['DeclareAttribute', 'attribute'],
             ['DeclareProperty', 'attribute'],
             ['DeclareCategory', 'attribute'],
+            ['DeclareFilter', 'attribute'],
             ['DeclareRepresentation', 'attribute'],
+            ['DeclareSynonym', 'global'],
+            ['DeclareSynonymAttr', 'attribute'],
+            ['DeclareTagBasedOperation', 'operation'],
+            ['DeclareConstructor', 'global'],
+            ['DeclareDataType', 'global'],
+            ['DeclareInfoClass', 'global'],
+            ['DeclareHasAndSet', 'global'],
+            ['DeclareObsoleteSynonym', 'global'],
+            ['DeclareObsoleteSynonymAttr', 'attribute'],
+            ['DeclareOperationWithCache', 'operation'],
+            ['DeclareAttributeWithCustomGetter', 'attribute'],
+            ['DeclareAttributeThatReturnsDigraph', 'attribute'],
         ]);
         const implementations = new Map<string, Extract<FileEvent, { kind: 'def' }>['symbolKind']>([
             ['InstallGlobalFunction', 'global-function'],
             ['InstallMethod', 'method'],
+            ['InstallOtherMethod', 'method'],
+            ['InstallEarlyMethod', 'method'],
+            ['InstallImmediateMethod', 'method'],
+            ['InstallTrueMethod', 'method'],
+            ['InstallTagBasedMethod', 'method'],
+            ['InstallValue', 'global'],
             ['BindGlobal', 'global'],
+            ['BindConstant', 'global'],
+            ['BindThreadLocal', 'global'],
+            ['BindThreadLocalConstructor', 'global'],
         ]);
+        const isDeclarationCall = (name: string): boolean =>
+            declarations.has(name) ||
+            /^(?:DeclareOperation|DeclareAttribute|DeclareProperty|DeclareCategory|DeclareRepresentation|DeclareConstructor)Kernel$/.test(name) ||
+            /^(?:DeclareAttribute|DeclareProperty)SuppCT$/.test(name);
+        const isImplementationCall = (name: string): boolean =>
+            implementations.has(name) ||
+            /^Install(?:Other)?Method(?:With.*|ForCompilerForCAP|ThatReturnsDigraph)?$/.test(name);
 
         const visit = (node: SyntaxNode): void => {
             if (node.type === 'call') {
@@ -540,24 +596,46 @@ export class GAPDefinitionResolver {
                 const firstArgument = argumentsNode?.namedChildren[0];
                 const functionName = functionNode?.type === 'identifier' ? functionNode.text : undefined;
                 const symbolKind = functionName
-                    ? declarations.get(functionName) ?? implementations.get(functionName)
+                    ? declarations.get(functionName) ??
+                        implementations.get(functionName) ??
+                        (isDeclarationCall(functionName) ? 'global' : undefined) ??
+                        (isImplementationCall(functionName) ? 'global' : undefined)
                     : undefined;
 
                 if (symbolKind && firstArgument) {
-                    const role = declarations.has(functionName!)
+                    const role = isDeclarationCall(functionName!)
                         ? 'declaration' as const
                         : 'implementation' as const;
                     let nameNode: SyntaxNode | null = null;
-                    if ((role === 'declaration' || functionName === 'BindGlobal') &&
+                    if (role === 'declaration' &&
                         firstArgument.type === 'string') {
                         nameNode = firstArgument.namedChildren.find(child => child.type === 'string_content') ?? null;
-                    } else if (role === 'implementation' && firstArgument.type === 'identifier') {
+                    } else if (role === 'implementation') {
+                        if ((functionName === 'BindGlobal' ||
+                            functionName === 'BindConstant' ||
+                            functionName === 'BindThreadLocalConstructor') &&
+                            firstArgument.type === 'string') {
+                            nameNode = firstArgument.namedChildren.find(
+                                child => child.type === 'string_content',
+                            ) ?? null;
+                        } else {
+                            nameNode = firstArgument.type === 'identifier'
+                                ? firstArgument
+                                : firstArgument.type === 'record_selector' ||
+                                    firstArgument.type === 'component_selector'
+                                    ? firstArgument.childForFieldName('selector')
+                                    : null;
+                        }
+                    } else if (role === 'declaration' && firstArgument.type === 'identifier') {
                         nameNode = firstArgument;
                     }
                     if (nameNode && !hasErrorAncestor(nameNode)) {
                         events.push({
                             kind: 'def',
-                            name: nameNode.text,
+                            name: firstArgument.type === 'record_selector' ||
+                                firstArgument.type === 'component_selector'
+                                ? firstArgument.text
+                                : nameNode.text,
                             offset: nameNode.startIndex,
                             end: nameNode.endIndex,
                             scope: GLOBAL_SCOPE,

@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import { isParserReady, getDocumentTree } from '../parser/gapParser';
 import { GAPDefinitionResolver } from '../hover/definitionResolver';
-import { symbolNameNodeAt } from '../shared/functionName';
+import { symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
 
 export class GAPDefinitionProvider implements vscode.DefinitionProvider {
 
@@ -31,7 +31,11 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         const node = symbolNameNodeAt(tree.rootNode, offset);
         if (!node) return undefined;
 
-        const resolved = this.resolver.resolveDefinitions(document, position, node.text);
+        const resolved = this.resolver.resolveDefinitions(
+            document,
+            position,
+            symbolLookupName(node),
+        );
         if (resolved.length === 0) return undefined;
 
         const first = resolved[0];
