@@ -38,30 +38,36 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         );
         if (resolved.length === 0) return undefined;
 
-        const first = resolved[0];
-        const firstSameDocument =
-            first.filePath !== '' &&
-            (process.platform === 'win32'
-                ? first.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
-                : first.filePath === document.uri.fsPath);
-        if (resolved.length === 1 &&
-            firstSameDocument &&
-            position.line === first.row &&
-            position.character >= first.column &&
-            position.character <= first.column + node.text.length) {
-            const uri = first.filePath === '' ? document.uri : vscode.Uri.file(first.filePath);
-            const zeroCharacter = position.character === first.column
-                ? first.column + node.text.length
-                : first.column;
+        const selfDefinition = resolved.find(item => {
+            const sameDocument =
+                item.filePath === '' ||
+                (process.platform === 'win32'
+                    ? item.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
+                    : item.filePath === document.uri.fsPath);
+            return sameDocument &&
+                position.line === item.row &&
+                position.character >= item.column &&
+                position.character <= item.column + node.text.length;
+        });
+        if (selfDefinition) {
+            const uri = selfDefinition.filePath === ''
+                ? document.uri
+                : vscode.Uri.file(selfDefinition.filePath);
+            const zeroCharacter = position.character === selfDefinition.column
+                ? selfDefinition.column + node.text.length
+                : selfDefinition.column;
             return [{
                 targetUri: uri,
                 targetRange: new vscode.Range(
-                    new vscode.Position(first.row, first.column),
-                    new vscode.Position(first.row, first.column + node.text.length),
+                    new vscode.Position(selfDefinition.row, selfDefinition.column),
+                    new vscode.Position(
+                        selfDefinition.row,
+                        selfDefinition.column + node.text.length,
+                    ),
                 ),
                 targetSelectionRange: new vscode.Range(
-                    new vscode.Position(first.row, zeroCharacter),
-                    new vscode.Position(first.row, zeroCharacter),
+                    new vscode.Position(selfDefinition.row, zeroCharacter),
+                    new vscode.Position(selfDefinition.row, zeroCharacter),
                 ),
             } as vscode.LocationLink];
         }

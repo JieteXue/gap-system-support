@@ -125,11 +125,11 @@ async function main() {
         const document = makeDocument('same-file.g', code);
         workspaceState.documents = [document];
 
-        check('definition includes itself and both usages', [0, 3, 4],
+        check('definition omits itself and returns both usages', [3, 4],
             linesOf(await referencesAt(provider, document, 'myfn :=')));
-        check('usage resolves the same reference set', [0, 3, 4],
+        check('usage omits itself from the reference set', [0, 4],
             linesOf(await referencesAt(provider, document, 'myfn(1)')));
-        check('declarations can be excluded', [3, 4],
+        check('declarations can be excluded', [4],
             linesOf(await referencesAt(provider, document, 'myfn(1)', 0, false)));
     }
 
@@ -146,9 +146,9 @@ async function main() {
         const document = makeDocument('shadow.g', code);
         workspaceState.documents = [document];
 
-        check('global references exclude the shadowed parameter', [0, 4, 5],
+        check('global references exclude the origin and shadowed parameter', [0, 5],
             linesOf(await referencesAt(provider, document, 'value;', 1)));
-        check('parameter references stay inside their function', [1, 2],
+        check('parameter references stay inside their function', [2],
             linesOf(await referencesAt(provider, document, 'value)', 0)));
 
         const localCode = [
@@ -162,7 +162,7 @@ async function main() {
         ].join('\n');
         const localDocument = makeDocument('local-assignment.g', localCode);
         workspaceState.documents = [localDocument];
-        check('local assignments stay inside their lexical scope', [2, 3],
+        check('local assignments stay inside their lexical scope', [3],
             linesOf(await referencesAt(provider, localDocument, 'item :=', 0)));
     }
 
@@ -180,11 +180,11 @@ async function main() {
         const document = makeDocument('qualified.g', code);
         workspaceState.documents = [document];
 
-        check('A.Print does not include B.Print', [0, 2],
+        check('A.Print does not include its origin or B.Print', [0],
             linesOf(await referencesAt(provider, document, 'Print;', 0)));
-        check('B.Print does not include A.Print', [1, 3],
+        check('B.Print does not include its origin or A.Print', [1],
             linesOf(await referencesAt(provider, document, 'Print;', 1)));
-        check('component selectors preserve the complete path', [5, 6],
+        check('component selectors preserve the complete path', [5],
             linesOf(await referencesAt(provider, document, 'cache;')));
     }
 
@@ -210,7 +210,7 @@ async function main() {
             workspaceState.documents = [internalDocument, apiDocument];
 
             check('workspace search returns the definition and both usages',
-                ['api.g:0', 'api.g:1', 'internal.g:0'],
+                ['api.g:1', 'internal.g:0'],
                 fileAndLineOf(await referencesAt(
                     provider,
                     apiDocument,
@@ -235,11 +235,11 @@ async function main() {
         const document = makeDocument('declaration.g', code);
         workspaceState.documents = [document];
 
-        check('declaration and implementation names count as declarations', [0, 1, 4],
+        check('declaration and implementation names count as declarations', [0, 1],
             linesOf(await referencesAt(provider, document, 'declaredFn(1)')));
-        check('ordinary strings and comments are excluded', 3,
+        check('ordinary strings and comments are excluded', 2,
             (await referencesAt(provider, document, 'declaredFn(1)')).length);
-        check('all declaration locations can be excluded', [4],
+        check('all declaration locations can be excluded', [],
             linesOf(await referencesAt(provider, document, 'declaredFn(1)', 0, false)));
     }
 
@@ -263,7 +263,7 @@ async function main() {
 
         const untitled = makeDocument('Untitled-1', 'temp := 1;\ntemp;\n', null, true);
         workspaceState.documents = [untitled];
-        check('untitled documents search only themselves', [0, 1],
+        check('untitled documents search only themselves', [0],
             linesOf(await referencesAt(provider, untitled, 'temp;', 0)));
     }
 

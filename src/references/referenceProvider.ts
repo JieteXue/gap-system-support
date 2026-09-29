@@ -65,6 +65,12 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         const definitions = this.resolver.resolveDefinitions(document, position, lookupName);
         if (definitions.length === 0) return [];
 
+        const originFilePath = document.isUntitled ? '' : document.uri.fsPath;
+        const originKey = locationKey(
+            originFilePath,
+            node.startPosition.row,
+            node.startPosition.column,
+        );
         const targetDefinitions = new Set(definitions.map(definitionKey));
         const definitionLocations = new Set(definitions.map(definitionKey));
         const documents = await this.workspaceDocuments(document, token);
@@ -74,7 +80,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         if (context.includeDeclaration) {
             for (const definition of definitions) {
                 const key = definitionKey(definition);
-                if (seen.has(key)) continue;
+                if (key === originKey || seen.has(key)) continue;
                 const definitionDocument = documents.find(candidate =>
                     definition.filePath === ''
                         ? candidate.uri.toString() === document.uri.toString()
@@ -110,6 +116,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                     candidate.startPosition.row,
                     candidate.startPosition.column,
                 );
+                if (key === originKey) continue;
                 const isDefinition = definitionLocations.has(key);
                 if (isDefinition && !context.includeDeclaration) continue;
 

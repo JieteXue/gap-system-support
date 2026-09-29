@@ -88,6 +88,10 @@ function defineAt(provider, doc, needle, occurrence = 0) {
     return Array.isArray(result) ? result[0] : result;
 }
 
+function definitionStartLine(location) {
+    return (location.range || location.targetRange).start.line;
+}
+
 async function main() {
     await initGapParser({ extensionUri: { fsPath: ROOT } });
 
@@ -422,7 +426,7 @@ async function main() {
         );
         check('InstallValue target is indexed as an implementation', true,
             Array.isArray(installedValue) &&
-            installedValue.some(location => location.range.start.line === 8));
+            installedValue.some(location => definitionStartLine(location) === 8));
         check('InstallOtherMethod target resolves', true,
             defineAt(provider, doc, 'declaredVariable', 4) !== undefined);
         const dottedMethod = provider.provideDefinition(

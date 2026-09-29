@@ -35,6 +35,11 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configurationDefaults": {
+      "[gap]": {
+        "editor.gotoLocation.alternativeDefinitionCommand": "editor.action.goToReferences"
+      }
+    },
     "languages": [
       {
         "id": "gap",

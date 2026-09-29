@@ -14,7 +14,7 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
 - **Code completion**: provides completion for GAP constants, keywords, statement structures, and GAP functions (including functions from other GAP files loaded via `Read`).
 - **Hover hints**: hovering over a function name shows a help link for GAP functions; for user defined functions it shows the definition line and the `##` comments.
 - **Definition navigation**: native Go to Definition and Peek Definition support for statically recognizable user-defined GAP symbols.
-- **Reference navigation**: native Find All References and Peek References support across GAP workspace files (`Shift+F12`).
+- **Reference navigation**: `Command+click` a definition to open Peek References, or use native Find All References (`Shift+F12`). The selected occurrence is omitted from the results.
 - **Running GAP code**: runs the current GAP file in the VS Code integrated terminal, with configurable GAP command line options.
 - **Help system**: built-in GAP help system with two search modes (switchable at any time in the settings or the Quick Pick search box), with results filterable by book.
   - **prefix**: same behavior as `?topic` in GAP
