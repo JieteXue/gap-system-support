@@ -37,7 +37,8 @@
   "contributes": {
     "configurationDefaults": {
       "[gap]": {
-        "editor.definitionLinkOpensInPeek": true
+        "editor.definitionLinkOpensInPeek": false,
+        "editor.gotoLocation.multipleDefinitions": "peek"
       }
     },
     "languages": [
