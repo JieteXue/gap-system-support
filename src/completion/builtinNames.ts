@@ -7,4 +7,3 @@ export const BUILTIN_FUNCTION_NAMES = new Set([
     'Unbind',
     'TryNextMethod',
 ]);
-
