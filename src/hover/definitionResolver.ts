@@ -27,7 +27,7 @@ type FileEvent =
          * Null for lambdas and definitions without a parameter list.
          */
         headerText: string | null;
-        symbolKind: 'function' | 'global-function' | 'operation' | 'method' | 'attribute' | 'global';
+        symbolKind: 'parameter' | 'variable' | 'function' | 'global-function' | 'operation' | 'method' | 'attribute' | 'global';
         role: 'local' | 'declaration' | 'implementation';
     }
     | { kind: 'read'; pathText: string; offset: number };
@@ -355,16 +355,36 @@ export class GAPDefinitionResolver {
         const events: FileEvent[] = [];
         // Scope nodes of this file, from the shared completion.scm capture.
         const scopeByStart = new Set<number>();
-        const defNodes: { node: SyntaxNode; keep: boolean }[] = [];
+        const defNodes = new Map<
+            string,
+            {
+                node: SyntaxNode;
+                keep: boolean;
+                symbolKind: 'parameter' | 'variable' | 'function';
+            }
+        >();
+        const kindPriority = { variable: 1, parameter: 2, function: 3 } as const;
         for (const match of this.query.get().matches(rootNode) as QueryMatch[]) {
-            let fnNode: SyntaxNode | null = null;
             let readFn = '';
             let readPath = '';
             let readCall: SyntaxNode | null = null;
             for (const capture of match.captures) {
                 const node = capture.node;
-                if (capture.name === 'completion.function') {
-                    if (!hasErrorAncestor(node)) fnNode = node;
+                const symbolKind =
+                    capture.name === 'completion.function' ? 'function' :
+                        capture.name === 'completion.parameter' ? 'parameter' :
+                            capture.name === 'completion.var' ? 'variable' :
+                                null;
+                if (symbolKind && !hasErrorAncestor(node)) {
+                    const key = `${node.startIndex}:${node.endIndex}`;
+                    const existing = defNodes.get(key);
+                    if (!existing || kindPriority[symbolKind] > kindPriority[existing.symbolKind]) {
+                        defNodes.set(key, {
+                            node,
+                            keep: !topLevelOnly || isTopLevel(node),
+                            symbolKind,
+                        });
+                    }
                 } else if (capture.name === 'completion.read-fn') {
                     if (!hasErrorAncestor(node)) readFn = node.text;
                 } else if (capture.name === 'completion.read-path') {
@@ -375,16 +395,13 @@ export class GAPDefinitionResolver {
                     if (!hasErrorAncestor(node)) scopeByStart.add(node.startIndex);
                 }
             }
-            if (fnNode) {
-                defNodes.push({ node: fnNode, keep: !topLevelOnly || isTopLevel(fnNode) });
-            }
             if (readFn === 'Read' && readPath && readCall && !hasErrorAncestor(readCall)) {
                 events.push({ kind: 'read', pathText: readPath, offset: readCall.endIndex });
             }
         }
 
         // Attach every definition to its innermost enclosing scope, as scoped.ts does.
-        for (const { node, keep } of defNodes) {
+        for (const { node, keep, symbolKind } of defNodes.values()) {
             if (!keep) continue;
             let scope = GLOBAL_SCOPE;
             let current: SyntaxNode | null = node.parent;
@@ -404,7 +421,7 @@ export class GAPDefinitionResolver {
                 row: node.startPosition.row,
                 column: node.startPosition.column,
                 headerText: this.functionHeaderText(node),
-                symbolKind: 'function',
+                symbolKind,
                 role: 'local',
             });
         }

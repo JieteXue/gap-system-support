@@ -107,9 +107,9 @@ async function main() {
         check('call callee resolves', true, fromCall !== undefined);
         const fromDef = defineAt(provider, doc, 'myfn :=');
         check('definition LHS name resolves', true, fromDef !== undefined);
-        // Variable assignments and keywords are not function names.
-        check('non-function identifiers stay blocked', true,
-            defineAt(provider, doc, 'y :=') === undefined &&
+        check('custom variable definitions resolve', true,
+            defineAt(provider, doc, 'y :=') !== undefined);
+        check('keywords stay blocked', true,
             defineAt(provider, doc, 'return') === undefined);
     }
 
@@ -256,10 +256,11 @@ async function main() {
         const nonCapCall = defineAt(provider, doc, 'NonCAPSuperSolvableSubgroup(G);', 0);
         check('call site resolves to the definition row', 18, nonCapCall && nonCapCall.range.start.line);
 
-        // System and local names stay blocked (no fabricated positions).
-        check('system and local identifiers stay blocked', true,
-            defineAt(provider, doc, 'NormalSubgroups(G)') === undefined &&
-            defineAt(provider, doc, 'isCover :=', 0) === undefined);
+        check('unknown system identifiers stay blocked', true,
+            defineAt(provider, doc, 'NormalSubgroups(G)') === undefined);
+        const isCover = defineAt(provider, doc, 'isCover :=', 0);
+        check('local variables resolve to their assignments', true,
+            isCover !== undefined && isCover.targetRange.start.line === 6);
     }
 
     section('10. Definition name returns a zero-width LocationLink');
@@ -366,6 +367,64 @@ async function main() {
             );
             check('cross-file operation returns all methods and declaration', 3,
                 Array.isArray(crossSize) ? crossSize.length : 0);
+        } finally {
+            workspaceState.folderPath = null;
+            fs.rmSync(tmp, { recursive: true, force: true });
+        }
+    }
+
+    section('12. Custom variables and lexical scope');
+    {
+        const code = [
+            'globalValue := 1;',
+            'result := globalValue;',
+            'worker := function(parameter)',
+            '  local localValue;',
+            '  localValue := parameter;',
+            '  for item in [localValue] do',
+            '    result := item;',
+            '  od;',
+            '  return localValue;',
+            'end;',
+            'recordValue := rec(field := globalValue);',
+            'recordValue.field;',
+        ].join('\n');
+        const doc = makeDocument('variables.g', code, null);
+
+        check('global variable reference resolves', 0,
+            defineAt(provider, doc, 'globalValue;', 0).range.start.line);
+        check('function parameter reference resolves', 2,
+            defineAt(provider, doc, 'parameter;', 0).range.start.line);
+        check('local assignment resolves to the latest definition', 4,
+            defineAt(provider, doc, 'localValue;', 1).range.start.line);
+        check('for-loop variable reference resolves', 5,
+            defineAt(provider, doc, 'item;', 0).range.start.line);
+        check('record selector does not resolve as a variable', true,
+            defineAt(provider, doc, 'field;', 0) === undefined);
+
+        const shadowCode = [
+            'value := 1;',
+            'f := function(value)',
+            '  return value;',
+            'end;',
+            'value;',
+        ].join('\n');
+        const shadowDoc = makeDocument('shadow.g', shadowCode, null);
+        check('parameter shadows global variable', 1,
+            defineAt(provider, shadowDoc, 'value;', 0).range.start.line);
+        check('global variable remains visible outside the function', 0,
+            defineAt(provider, shadowDoc, 'value;', 1).range.start.line);
+
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-variable-'));
+        try {
+            fs.writeFileSync(path.join(tmp, 'values.g'), 'sharedValue := 42;\n');
+            workspaceState.folderPath = tmp;
+            const mainCode = 'Read("values.g");\nanswer := sharedValue;\n';
+            const mainDoc = makeDocument('main.g', mainCode, tmp);
+            const shared = defineAt(provider, mainDoc, 'sharedValue;');
+            check('custom variable follows a Read chain', true,
+                shared !== undefined && shared.uri.fsPath === path.join(tmp, 'values.g') &&
+                shared.range.start.line === 0);
         } finally {
             workspaceState.folderPath = null;
             fs.rmSync(tmp, { recursive: true, force: true });

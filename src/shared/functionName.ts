@@ -29,18 +29,8 @@ const STRING_NAME_CALLS = new Set([
  * All other positions, such as variables, parameters, or keywords, return null.
  */
 export function functionNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
-    const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
-
-    // A cursor right after the name falls into the parent node.
-    // Fall back to the node at the previous character in that case.
-    let node = root.descendantForIndex(clamped);
-    if (!node || node.type !== 'identifier') {
-        const prev = root.descendantForIndex(Math.max(0, clamped - 1));
-        if (prev && prev.type === 'identifier') {
-            node = prev;
-        }
-    }
-    if (!node || node.type !== 'identifier') return null;
+    const node = identifierNodeAt(root, offset);
+    if (!node) return null;
 
     const parent = node.parent;
     if (!parent) return null;
@@ -81,6 +71,30 @@ export function functionNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode
     return null;
 }
 
+/** Return the identifier at the cursor, including a cursor at the word end. */
+function identifierNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
+    let node = root.descendantForIndex(clamped);
+    if (!node || node.type !== 'identifier') {
+        const previous = root.descendantForIndex(Math.max(0, clamped - 1));
+        if (previous?.type === 'identifier') node = previous;
+    }
+    return node?.type === 'identifier' ? node : null;
+}
+
+/** Record field names are properties, not variable references. */
+function isRecordField(node: SyntaxNode): boolean {
+    const parent = node.parent;
+    if (!parent) return false;
+    if (parent.type === 'record_selector') {
+        return parent.childForFieldName('selector')?.id === node.id;
+    }
+    if (parent.type === 'record_entry') {
+        return parent.childForFieldName('left')?.id === node.id;
+    }
+    return false;
+}
+
 /** Return a declaration string name under the cursor. */
 function declarationStringNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
     let node = root.descendantForIndex(Math.max(0, Math.min(offset, root.endIndex - 1)));
@@ -108,7 +122,9 @@ function declarationStringNodeAt(root: SyntaxNode, offset: number): SyntaxNode |
     return node;
 }
 
-/** Return a function or GAP symbol name under the cursor. */
+/** Return any resolvable GAP symbol name under the cursor. */
 export function symbolNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
-    return functionNameNodeAt(root, offset) ?? declarationStringNodeAt(root, offset);
+    const identifier = identifierNodeAt(root, offset);
+    if (identifier && !isRecordField(identifier)) return identifier;
+    return declarationStringNodeAt(root, offset);
 }
