@@ -161,7 +161,7 @@ async function main() {
 
     const provider = new GAPHoverProvider(QUERY_PATH);
 
-    section('1. Node classification: only function names trigger a hover');
+    section('1. Node classification and static symbol types');
     {
         const code = [
             'myfn := function(x)',
@@ -169,14 +169,31 @@ async function main() {
             'end;',
             'myfn(1);',
             'y := 3;',
+            'typed := function(parameter)',
+            '  return parameter;',
+            'end;',
             'f2 := { x -> x + 1 };',
         ].join('\n');
         const doc = makeDocument('classify.g', code, null);
         check('definition identifier hovers', true, (await hoverAt(provider, doc, 'myfn :=')) !== undefined);
         check('call identifier hovers', true, (await hoverAt(provider, doc, 'myfn(1)')) !== undefined);
         check('lambda definition hovers', true, (await hoverAt(provider, doc, 'f2 :=')) !== undefined);
-        check('variable assignment does not hover', true, (await hoverAt(provider, doc, 'y :=')) === undefined);
-        check('keyword does not hover', true, (await hoverAt(provider, doc, 'return')) === undefined);
+        check('variable assignment hovers', true, (await hoverAt(provider, doc, 'y :=')).contents.value.includes('**variable**'));
+        check('parameter reference shows parameter type', true,
+            (await hoverAt(provider, doc, 'parameter;')).contents.value.includes('**parameter**'));
+        check('user function shows function type', true,
+            (await hoverAt(provider, doc, 'typed :=')).contents.value.includes('**function**'));
+        check('keyword shows its syntax role', true,
+            textOf(await hoverAt(provider, doc, 'return')).includes('**control keyword**'));
+        const conditional = makeDocument(
+            'conditional.g',
+            'if not IsBound(value) then\n  return value;\nfi;\n',
+            null,
+        );
+        check('if keyword hovers', true, textOf(await hoverAt(provider, conditional, 'if ')).includes('conditional block'));
+        check('not keyword hovers', true, textOf(await hoverAt(provider, conditional, 'not ')).includes('Negates'));
+        check('then keyword hovers', true, textOf(await hoverAt(provider, conditional, 'then')).includes('conditional branch'));
+        check('fi keyword hovers', true, textOf(await hoverAt(provider, conditional, 'fi;')).includes('Ends a conditional'));
         // A position right after the name still hovers.
         check('definition name at word end still hovers', true, provider.provideHover(doc, { line: 0, character: 4 }, new CancellationTokenStub()) !== undefined);
     }
@@ -445,6 +462,28 @@ async function main() {
         const doc9 = makeDocument('main9.g', code9, tmp);
         check('open document content used for Read files', true,
             textOf(await hoverAt(provider, doc9, 'openfn(')).includes('open doc'));
+
+        fs.writeFileSync(path.join(tmp, 'future.g'), 'if not IsBound(FutureValue) then\n  Read("future-def.g");\nfi;\n');
+        fs.writeFileSync(path.join(tmp, 'future-def.g'), 'FutureValue := rec();\n');
+        const futureDoc = makeDocument('future.g', fs.readFileSync(path.join(tmp, 'future.g'), 'utf8'), tmp);
+        const futureHover = await hoverAt(provider, futureDoc, 'FutureValue');
+        check('IsBound guard resolves a future Read definition', true,
+            textOf(futureHover).includes('**variable**'));
+
+        fs.writeFileSync(path.join(tmp, 'dynamic-loader.g'), [
+            'if not IsBound(CrossFileValue) then',
+            '  Read(Concatenation(directory, "dynamic-def.g"));',
+            'fi;',
+        ].join('\n'));
+        fs.writeFileSync(path.join(tmp, 'dynamic-def.g'), 'CrossFileValue := rec();\n');
+        const dynamicDoc = makeDocument(
+            'dynamic-loader.g',
+            fs.readFileSync(path.join(tmp, 'dynamic-loader.g'), 'utf8'),
+            tmp,
+        );
+        const dynamicHover = await hoverAt(provider, dynamicDoc, 'CrossFileValue');
+        check('IsBound guard finds a cross-file definition for a dynamic Read', true,
+            textOf(dynamicHover).includes('**variable**'));
         workspaceState.textDocuments.length = 0;
     } finally {
         workspaceState.folderPath = null;
@@ -468,12 +507,57 @@ async function main() {
         const doc = makeDocument('system.g', code, null);
         const hover = await hoverAt(provider, doc, 'Size(');
         check('GAP function shows the title', true,
-            textOf(hover).includes('**GAP function**'));
+            textOf(hover).includes('**built-in function**'));
         check('GAP function shows the help link text', true,
             textOf(hover).includes('See more information in'));
         check('link targets the hovered name', 'Size', linkTerm(hover.contents));
         check('markdown trust limited to the term command',
             JSON.stringify(['gap.searchHelpTerm']), JSON.stringify(hover.contents.isTrusted.enabledCommands));
+
+        const helpData = require('../../../out/help/helpData');
+        const realGetHelpState = helpData.getHelpState;
+        const realGetConfiguration = vscodeMock.workspace.getConfiguration;
+        const helpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-help-'));
+        fs.mkdirSync(path.join(helpRoot, 'ref'), { recursive: true });
+        fs.writeFileSync(path.join(helpRoot, 'ref', 'chap30.html'), [
+            '<p id="XTEST"></p>',
+            '<h5>30.4-6 Size</h5>',
+            '<div class="func">Size( listorcoll )</div>',
+            '<p>Returns the size of a list or collection.</p>',
+        ].join('\n'));
+        helpData.getHelpState = () => ({
+            entries: [{
+                filePath: '/doc/ref/chap30.html#XTEST',
+                anchor: 'XTEST',
+                display: 'Size',
+                key: 'size',
+                book: 'Reference',
+                chapter: 30,
+                section: 4,
+                isTextOnly: false,
+                type: 'F',
+            }],
+            bookDescriptions: new Map(),
+        });
+        vscodeMock.workspace.getConfiguration = () => ({
+            get: key => key === 'docPath' ? helpRoot : key === 'pkgPath' ? helpRoot : undefined,
+        });
+        const described = await hoverAt(provider, doc, 'Size(');
+        check('GAP function includes a short help description', true,
+            textOf(described).includes('Returns the size of a list or collection.'));
+
+        dataManager.getFunctionNames = () => new Set();
+        const indexedBuiltin = await hoverAt(provider, doc, 'Size(');
+        check('help-indexed function hovers without completion data', true,
+            textOf(indexedBuiltin).includes('**built-in function**'));
+        const isBound = await hoverAt(provider, makeDocument('guard.g', 'if not IsBound(value) then\nfi;\n', null), 'IsBound(');
+        check('runtime built-in function hovers without completion data', true,
+            textOf(isBound).includes('**built-in function**'));
+
+        dataManager.getFunctionNames = realGet;
+        helpData.getHelpState = realGetHelpState;
+        vscodeMock.workspace.getConfiguration = realGetConfiguration;
+        fs.rmSync(helpRoot, { recursive: true, force: true });
 
         dataManager.getFunctionNames = realGet;
     }
