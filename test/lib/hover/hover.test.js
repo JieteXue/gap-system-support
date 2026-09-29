@@ -522,6 +522,9 @@ async function main() {
             textOf(described).includes('Returns the size of a list or collection.'));
 
         dataManager.getFunctionNames = () => new Set();
+        const indexedBuiltin = await hoverAt(provider, doc, 'Size(');
+        check('help-indexed function hovers without completion data', true,
+            textOf(indexedBuiltin).includes('**built-in function**'));
         const isBound = await hoverAt(provider, makeDocument('guard.g', 'if not IsBound(value) then\nfi;\n', null), 'IsBound(');
         check('runtime built-in function hovers without completion data', true,
             textOf(isBound).includes('**built-in function**'));

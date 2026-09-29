@@ -205,7 +205,8 @@ export class GAPHoverProvider implements vscode.HoverProvider {
 
         // Gate 2: GAP functions win over user defined ones.
         const systemNames = getFunctionNames();
-        if (systemNames?.has(name) || BUILTIN_FUNCTION_NAMES.has(name)) {
+        const help = findBuiltinHelp(name);
+        if (systemNames?.has(name) || BUILTIN_FUNCTION_NAMES.has(name) || help) {
             return new vscode.Hover(systemMarkdown(name), this.rangeOf(document, node));
         }
 
