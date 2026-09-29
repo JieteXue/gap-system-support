@@ -180,6 +180,8 @@ async function main() {
         const document = makeDocument('qualified.g', code);
         workspaceState.documents = [document];
 
+        check('record field definition resolves its qualified references', [2],
+            linesOf(await referencesAt(provider, document, 'Print :=', 0)));
         check('A.Print does not include its origin or B.Print', [0],
             linesOf(await referencesAt(provider, document, 'Print;', 0)));
         check('B.Print does not include its origin or A.Print', [1],

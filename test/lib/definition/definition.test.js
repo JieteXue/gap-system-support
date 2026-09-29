@@ -513,10 +513,25 @@ async function main() {
             'MagneticEquivalence.Matrix.Block(1);',
         ].join('\n');
         const nestedRecordDoc = makeDocument('nested-record.g', nestedRecordCode, null);
+        check('nested record field resolves from its definition name', 2,
+            definitionStartLine(defineAt(provider, nestedRecordDoc, 'Block :=')));
         check('nested record selector resolves the outer field', 1,
             defineAt(provider, nestedRecordDoc, 'Matrix.', 0).range.start.line);
         check('nested record selector resolves the inner field', 2,
             defineAt(provider, nestedRecordDoc, 'Block(', 0).range.start.line);
+
+        const nestedReferenceProvider = new GAPReferenceProvider(QUERY_PATH);
+        const nestedClickableProvider = new GAPDefinitionProvider(
+            QUERY_PATH,
+            nestedReferenceProvider,
+        );
+        const nestedClickTargets = await nestedClickableProvider.provideDefinition(
+            nestedRecordDoc,
+            positionOf(nestedRecordCode, 'Block :='),
+            new CancellationTokenStub(),
+        );
+        check('nested record definition click returns its usage', [7],
+            nestedClickTargets.map(location => location.range.start.line));
 
         const dottedAssignmentCode = [
             'MagneticEquivalence := rec(Matrix := rec());',
