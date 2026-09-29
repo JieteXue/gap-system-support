@@ -1,10 +1,31 @@
-/** Shared gating for function name identifiers. */
+/** Shared gating for function and GAP symbol names. */
 
 import type { SyntaxNode } from 'web-tree-sitter';
 
+const DECLARATION_CALLS = new Set([
+    'DeclareGlobalFunction',
+    'DeclareOperation',
+    'DeclareAttribute',
+    'DeclareProperty',
+    'DeclareCategory',
+    'DeclareRepresentation',
+]);
+
+const IMPLEMENTATION_CALLS = new Set([
+    'InstallGlobalFunction',
+    'InstallMethod',
+    'BindGlobal',
+]);
+
+const STRING_NAME_CALLS = new Set([
+    ...DECLARATION_CALLS,
+    'BindGlobal',
+]);
+
 /**
- * Return the identifier node when the cursor is on a function name.
- * Positions on a call callee or a function definition LHS qualify.
+ * Return the name node when the cursor is on a function or GAP symbol name.
+ * Positions on a call callee, function definition LHS, or declaration/
+ * installation name qualify.
  * All other positions, such as variables, parameters, or keywords, return null.
  */
 export function functionNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
@@ -45,5 +66,49 @@ export function functionNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode
         }
     }
 
+    if (parent.type === 'argument_list') {
+        const call = parent.parent;
+        const functionNode = call?.type === 'call' ? call.childForFieldName('function') : null;
+        const firstArgument = parent.namedChildren[0];
+        if (call?.type === 'call' &&
+            functionNode?.type === 'identifier' &&
+            firstArgument?.id === node.id &&
+            IMPLEMENTATION_CALLS.has(functionNode.text)) {
+            return node;
+        }
+    }
+
     return null;
+}
+
+/** Return a declaration string name under the cursor. */
+function declarationStringNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    let node = root.descendantForIndex(Math.max(0, Math.min(offset, root.endIndex - 1)));
+    if (!node || node.type !== 'string_content') {
+        const previous = root.descendantForIndex(Math.max(0, Math.min(offset - 1, root.endIndex - 1)));
+        if (previous?.type === 'string_content') node = previous;
+    }
+    if (!node || node.type !== 'string_content') return null;
+
+    const stringNode = node.parent;
+    const argumentsNode = stringNode?.parent;
+    const call = argumentsNode?.parent;
+    if (stringNode?.type !== 'string' ||
+        argumentsNode?.type !== 'argument_list' ||
+        call?.type !== 'call') {
+        return null;
+    }
+    const functionNode = call.childForFieldName('function');
+    const firstArgument = argumentsNode.namedChildren[0];
+    if (functionNode?.type !== 'identifier' ||
+        firstArgument?.id !== stringNode.id ||
+        !STRING_NAME_CALLS.has(functionNode.text)) {
+        return null;
+    }
+    return node;
+}
+
+/** Return a function or GAP symbol name under the cursor. */
+export function symbolNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    return functionNameNodeAt(root, offset) ?? declarationStringNodeAt(root, offset);
 }

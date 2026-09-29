@@ -280,6 +280,98 @@ async function main() {
             loc[0].targetSelectionRange.start.character === 0);
     }
 
+    section('11. GAP declarations, implementations, and methods');
+    {
+        const code = [
+            'DeclareGlobalFunction("declaredFn");',
+            'InstallGlobalFunction(declaredFn, function(x)',
+            '  return x;',
+            'end);',
+            'DeclareOperation("Size", [IsObject]);',
+            'InstallMethod(Size, [IsList], function(x)',
+            '  return Length(x);',
+            'end);',
+            'InstallMethod(Size, [IsGroup], function(x)',
+            '  return 1;',
+            'end);',
+            'BindGlobal("boundFn", function() end);',
+            'declaredFn(1);',
+            'Size([]);',
+            'boundFn();',
+        ].join('\n');
+        const doc = makeDocument('declarations.g', code, null);
+
+        const declared = provider.provideDefinition(
+            doc,
+            positionOf(code, 'declaredFn(1);'),
+            new CancellationTokenStub(),
+        );
+        check('global function declaration and installation return candidates', 2,
+            Array.isArray(declared) ? declared.length : 0);
+        check('global function implementation is first candidate', 1,
+            declared ? declared[0].range.start.line : -1);
+
+        const methods = provider.provideDefinition(
+            doc,
+            positionOf(code, 'Size([]);'),
+            new CancellationTokenStub(),
+        );
+        check('operation returns declaration and all methods', 3,
+            Array.isArray(methods) ? methods.length : 0);
+        check('operation implementation candidates precede declaration', true,
+            Boolean(methods && methods[0].range.start.line === 5 &&
+                methods[1].range.start.line === 8 &&
+                methods[2].range.start.line === 4));
+
+        const bound = defineAt(provider, doc, 'boundFn();');
+        check('BindGlobal string name resolves', true, bound !== undefined && bound.range.start.line === 11);
+
+        const declarationName = defineAt(provider, doc, 'declaredFn', 0);
+        check('declaration string is a valid definition position', true,
+            declarationName !== undefined && declarationName.targetRange.start.line === 0);
+
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-declaration-'));
+        try {
+            fs.writeFileSync(path.join(tmp, 'decl.gd'), [
+                'DeclareGlobalFunction("crossFileFn");',
+                'DeclareOperation("CrossSize", [IsObject]);',
+            ].join('\n'));
+            fs.writeFileSync(path.join(tmp, 'impl.gi'), [
+                'InstallGlobalFunction(crossFileFn, function(x) return x; end);',
+                'InstallMethod(CrossSize, [IsList], function(x) return Length(x); end);',
+                'InstallMethod(CrossSize, [IsGroup], function(x) return 1; end);',
+            ].join('\n'));
+            workspaceState.folderPath = tmp;
+            const mainCode = [
+                'Read("decl.gd");',
+                'Read("impl.gi");',
+                'crossFileFn(1);',
+                'CrossSize([]);',
+            ].join('\n');
+            const mainDoc = makeDocument('main.g', mainCode, tmp);
+            const crossFileFn = provider.provideDefinition(
+                mainDoc,
+                positionOf(mainCode, 'crossFileFn(1);'),
+                new CancellationTokenStub(),
+            );
+            check('cross-file function follows gd/gi Read chain', true,
+                Array.isArray(crossFileFn) &&
+                crossFileFn.length === 2 &&
+                crossFileFn[0].uri.fsPath === path.join(tmp, 'impl.gi'));
+
+            const crossSize = provider.provideDefinition(
+                mainDoc,
+                positionOf(mainCode, 'CrossSize([]);'),
+                new CancellationTokenStub(),
+            );
+            check('cross-file operation returns all methods and declaration', 3,
+                Array.isArray(crossSize) ? crossSize.length : 0);
+        } finally {
+            workspaceState.folderPath = null;
+            fs.rmSync(tmp, { recursive: true, force: true });
+        }
+    }
+
     summary();
 }
 

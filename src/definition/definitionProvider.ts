@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import { isParserReady, getDocumentTree } from '../parser/gapParser';
 import { GAPDefinitionResolver } from '../hover/definitionResolver';
-import { functionNameNodeAt } from '../shared/functionName';
+import { symbolNameNodeAt } from '../shared/functionName';
 
 export class GAPDefinitionProvider implements vscode.DefinitionProvider {
 
@@ -21,56 +21,61 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         document: vscode.TextDocument,
         position: vscode.Position,
         token: vscode.CancellationToken,
-    ): vscode.Location | vscode.LocationLink[] | undefined {
+    ): vscode.Definition | vscode.DefinitionLink[] | undefined {
         if (!isParserReady()) return undefined;
 
-        // Only callees and function definition LHS names qualify.
+        // Only function and GAP symbol names qualify.
         const offset = document.offsetAt(position);
         if (token.isCancellationRequested) return undefined;
         const tree = getDocumentTree(document);
-        const node = functionNameNodeAt(tree.rootNode, offset);
+        const node = symbolNameNodeAt(tree.rootNode, offset);
         if (!node) return undefined;
 
-        const resolved = this.resolver.resolveDefinition(document, position, node.text);
-        if (!resolved) return undefined;
+        const resolved = this.resolver.resolveDefinitions(document, position, node.text);
+        if (resolved.length === 0) return undefined;
 
-        // Same-document hits reuse the document URI.
-        // Read chain files use the disk path.
-        const sameDocument =
-            resolved.filePath !== '' &&
+        const first = resolved[0];
+        const firstSameDocument =
+            first.filePath !== '' &&
             (process.platform === 'win32'
-                ? resolved.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
-                : resolved.filePath === document.uri.fsPath);
-        const uri = sameDocument || resolved.filePath === '' ? document.uri : vscode.Uri.file(resolved.filePath);
-
-        const targetRange = new vscode.Range(
-            new vscode.Position(resolved.row, resolved.column),
-            new vscode.Position(resolved.row, resolved.column + node.text.length),
-        );
-
-        // The cursor can sit on the definition name in the same document.
-        // Return a LocationLink with a zero-width selection range.
-        // The selection range never contains the cursor.
-
-        // Anchor the selection point at the far end of the name.
-        // This happens only when the cursor sits on the first character.
-        if (sameDocument &&
-            position.line === resolved.row &&
-            position.character >= resolved.column &&
-            position.character <= resolved.column + node.text.length) {
-            const zeroCharacter = position.character === resolved.column
-                ? resolved.column + node.text.length
-                : resolved.column;
+                ? first.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
+                : first.filePath === document.uri.fsPath);
+        if (resolved.length === 1 &&
+            firstSameDocument &&
+            position.line === first.row &&
+            position.character >= first.column &&
+            position.character <= first.column + node.text.length) {
+            const uri = first.filePath === '' ? document.uri : vscode.Uri.file(first.filePath);
+            const zeroCharacter = position.character === first.column
+                ? first.column + node.text.length
+                : first.column;
             return [{
                 targetUri: uri,
-                targetRange,
+                targetRange: new vscode.Range(
+                    new vscode.Position(first.row, first.column),
+                    new vscode.Position(first.row, first.column + node.text.length),
+                ),
                 targetSelectionRange: new vscode.Range(
-                    new vscode.Position(resolved.row, zeroCharacter),
-                    new vscode.Position(resolved.row, zeroCharacter),
+                    new vscode.Position(first.row, zeroCharacter),
+                    new vscode.Position(first.row, zeroCharacter),
                 ),
             } as vscode.LocationLink];
         }
 
-        return new vscode.Location(uri, targetRange);
+        return resolved.map(item => {
+            const sameDocument =
+                item.filePath !== '' &&
+                (process.platform === 'win32'
+                    ? item.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
+                    : item.filePath === document.uri.fsPath);
+            const uri = sameDocument || item.filePath === '' ? document.uri : vscode.Uri.file(item.filePath);
+            return new vscode.Location(
+                uri,
+                new vscode.Range(
+                    new vscode.Position(item.row, item.column),
+                    new vscode.Position(item.row, item.column + node.text.length),
+                ),
+            );
+        });
     }
 }

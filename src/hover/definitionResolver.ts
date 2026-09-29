@@ -27,6 +27,8 @@ type FileEvent =
          * Null for lambdas and definitions without a parameter list.
          */
         headerText: string | null;
+        symbolKind: 'function' | 'global-function' | 'operation' | 'method' | 'attribute' | 'global';
+        role: 'local' | 'declaration' | 'implementation';
     }
     | { kind: 'read'; pathText: string; offset: number };
 
@@ -138,6 +140,131 @@ export class GAPDefinitionResolver {
         );
         const start = this.scanBackwards(globalScan, lines, new Set([name]), baseDir, new Set(), currentFilePath);
         return start ? this.toDefinition(start) : null;
+    }
+
+    /** Resolve all static declaration/installation locations for a GAP symbol. */
+    resolveDefinitions(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        name: string,
+    ): ResolvedDefinition[] {
+        const symbolDefinitions = this.resolveSymbolDefinitions(document, position, name);
+        if (symbolDefinitions.length > 0) return symbolDefinitions;
+        const definition = this.resolveDefinition(document, position, name);
+        return definition ? [definition] : [];
+    }
+
+    private resolveSymbolDefinitions(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        name: string,
+    ): ResolvedDefinition[] {
+        const text = document.getText();
+        if (!isParserReady() || text.length > READ_CONTENT_LIMIT) return [];
+
+        const tree = getDocumentTree(document, text);
+        if (!tree) return [];
+
+        const cacheKey = document.uri.toString();
+        let events: FileEvent[];
+        let lines: string[];
+        const cached = this.documentCache.peek(cacheKey);
+        if (cached && cached.version === document.version && cached.tree === tree) {
+            this.documentCache.touch(cacheKey, cached);
+            events = cached.events;
+            lines = cached.lines;
+        } else {
+            const collected = this.collectEvents(tree.rootNode, false);
+            events = collected.events.sort((left, right) => left.offset - right.offset);
+            lines = text.split(/\r?\n/);
+            this.documentCache.set(cacheKey, {
+                version: document.version,
+                tree,
+                events,
+                scopeByStart: collected.scopeByStart,
+                lines,
+            });
+        }
+        const baseDir = resolveReadBaseDir(document);
+        const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
+        const offset = document.offsetAt(position);
+        const candidates = this.scanAllSymbolDefinitions(
+            events,
+            lines,
+            name,
+            offset,
+            baseDir,
+            new Set(),
+            currentFilePath,
+            true,
+        );
+
+        const seen = new Set<string>();
+        return candidates
+            .filter(candidate => {
+                const key = `${candidate.filePath}:${candidate.event.row}:${candidate.event.column}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            })
+            .sort((left, right) => {
+                const roleOrder = (role: 'local' | 'declaration' | 'implementation') =>
+                    role === 'implementation' ? 0 : role === 'declaration' ? 1 : 2;
+                return roleOrder(left.event.role) - roleOrder(right.event.role) ||
+                    left.filePath.localeCompare(right.filePath) ||
+                    left.event.row - right.event.row ||
+                    left.event.column - right.event.column;
+            })
+            .map(candidate => this.toDefinition({
+                lines: candidate.lines,
+                row: candidate.event.row,
+                column: candidate.event.column,
+                filePath: candidate.filePath,
+                headerText: candidate.event.headerText,
+                name: candidate.event.name,
+            }));
+    }
+
+    private scanAllSymbolDefinitions(
+        events: FileEvent[],
+        lines: string[],
+        name: string,
+        maxOffset: number,
+        baseDir: string | null,
+        visited: Set<string>,
+        currentFilePath: string,
+        currentFile: boolean,
+    ): { event: Extract<FileEvent, { kind: 'def' }>; lines: string[]; filePath: string }[] {
+        const results: { event: Extract<FileEvent, { kind: 'def' }>; lines: string[]; filePath: string }[] = [];
+        for (let index = events.length - 1; index >= 0; index--) {
+            const event = events[index];
+            if (event.kind === 'def') {
+                if (event.role !== 'local' &&
+                    event.name === name &&
+                    (!currentFile || event.offset <= maxOffset)) {
+                    results.push({ event, lines, filePath: currentFilePath });
+                }
+                continue;
+            }
+
+            if (!baseDir || (currentFile && event.offset > maxOffset)) continue;
+            const target = resolveReadTarget(event.pathText, baseDir);
+            if (!target || visited.has(target)) continue;
+            visited.add(target);
+            const read = this.fileCache.loadFile(target);
+            if (!read) continue;
+            results.push(...this.scanAllSymbolDefinitions(
+                read.events,
+                read.lines,
+                name,
+                Number.POSITIVE_INFINITY,
+                baseDir,
+                visited,
+                target,
+                false,
+            ));
+        }
+        return results;
     }
 
     /** Collect the scope keys visible at the offset, mirroring scoped.ts getItems. */
@@ -277,9 +404,73 @@ export class GAPDefinitionResolver {
                 row: node.startPosition.row,
                 column: node.startPosition.column,
                 headerText: this.functionHeaderText(node),
+                symbolKind: 'function',
+                role: 'local',
             });
         }
+        events.push(...this.collectGapSymbolEvents(rootNode));
         return { events, scopeByStart };
+    }
+
+    /** Collect global declaration and installation calls from the AST. */
+    private collectGapSymbolEvents(rootNode: SyntaxNode): Extract<FileEvent, { kind: 'def' }>[] {
+        const events: Extract<FileEvent, { kind: 'def' }>[] = [];
+        const declarations = new Map<string, Extract<FileEvent, { kind: 'def' }>['symbolKind']>([
+            ['DeclareGlobalFunction', 'global-function'],
+            ['DeclareOperation', 'operation'],
+            ['DeclareAttribute', 'attribute'],
+            ['DeclareProperty', 'attribute'],
+            ['DeclareCategory', 'attribute'],
+            ['DeclareRepresentation', 'attribute'],
+        ]);
+        const implementations = new Map<string, Extract<FileEvent, { kind: 'def' }>['symbolKind']>([
+            ['InstallGlobalFunction', 'global-function'],
+            ['InstallMethod', 'method'],
+            ['BindGlobal', 'global'],
+        ]);
+
+        const visit = (node: SyntaxNode): void => {
+            if (node.type === 'call') {
+                const functionNode = node.childForFieldName('function');
+                const argumentsNode = node.childForFieldName('arguments');
+                const firstArgument = argumentsNode?.namedChildren[0];
+                const functionName = functionNode?.type === 'identifier' ? functionNode.text : undefined;
+                const symbolKind = functionName
+                    ? declarations.get(functionName) ?? implementations.get(functionName)
+                    : undefined;
+
+                if (symbolKind && firstArgument) {
+                    const role = declarations.has(functionName!)
+                        ? 'declaration' as const
+                        : 'implementation' as const;
+                    let nameNode: SyntaxNode | null = null;
+                    if ((role === 'declaration' || functionName === 'BindGlobal') &&
+                        firstArgument.type === 'string') {
+                        nameNode = firstArgument.namedChildren.find(child => child.type === 'string_content') ?? null;
+                    } else if (role === 'implementation' && firstArgument.type === 'identifier') {
+                        nameNode = firstArgument;
+                    }
+                    if (nameNode && !hasErrorAncestor(nameNode)) {
+                        events.push({
+                            kind: 'def',
+                            name: nameNode.text,
+                            offset: nameNode.startIndex,
+                            end: nameNode.endIndex,
+                            scope: GLOBAL_SCOPE,
+                            row: nameNode.startPosition.row,
+                            column: nameNode.startPosition.column,
+                            headerText: null,
+                            symbolKind,
+                            role,
+                        });
+                    }
+                }
+            }
+            for (const child of node.namedChildren) visit(child);
+        };
+
+        visit(rootNode);
+        return events;
     }
 
     /**
