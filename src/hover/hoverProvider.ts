@@ -55,16 +55,68 @@ const KEYWORD_DESCRIPTIONS: Readonly<Record<string, { type: string; description:
     quit: { type: 'control keyword', description: 'Exits the current session.' },
 };
 
-function keywordNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+const LITERAL_DESCRIPTIONS: Readonly<Record<string, string>> = {
+    true: 'The boolean true value.',
+    false: 'The boolean false value.',
+    fail: 'Represents failure when an operation cannot produce a normal result.',
+};
+
+function syntaxNodeAt(root: SyntaxNode, offset: number): SyntaxNode[] {
     const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
-    const candidates = [
+    return [
         root.descendantForIndex(clamped),
         root.descendantForIndex(Math.max(0, clamped - 1)),
     ];
-    for (const node of candidates) {
+}
+
+function keywordNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    for (const node of syntaxNodeAt(root, offset)) {
         if (node && KEYWORD_DESCRIPTIONS[node.text]) return node;
     }
     return null;
+}
+
+function literalNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    for (const node of syntaxNodeAt(root, offset)) {
+        if (node && LITERAL_DESCRIPTIONS[node.text]) return node;
+    }
+    return null;
+}
+
+function selectorExpression(node: SyntaxNode): SyntaxNode {
+    let current = node;
+    while (current.parent &&
+        (current.parent.type === 'record_selector' ||
+            current.parent.type === 'component_selector') &&
+        current.parent.namedChildren.some(child => child.id === current.id)) {
+        current = current.parent;
+    }
+    return current;
+}
+
+function hoverSymbolNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    const symbol = symbolNameNodeAt(root, offset);
+    if (symbol) return symbol;
+    for (const node of syntaxNodeAt(root, offset)) {
+        if ((node?.text === '.' || node?.text === '!.') &&
+            (node.parent?.type === 'record_selector' ||
+                node.parent?.type === 'component_selector')) {
+            return node.parent.childForFieldName('selector');
+        }
+    }
+    return null;
+}
+
+function hoverLookupName(node: SyntaxNode): string {
+    const expression = selectorExpression(node);
+    return expression.id === node.id ? symbolLookupName(node) : expression.text;
+}
+
+function isCallCallee(node: SyntaxNode): boolean {
+    const expression = selectorExpression(node);
+    const call = expression.parent;
+    return call?.type === 'call' &&
+        call.childForFieldName('function')?.id === expression.id;
 }
 
 function keywordMarkdown(keyword: string): vscode.MarkdownString {
@@ -72,6 +124,13 @@ function keywordMarkdown(keyword: string): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${info.type}**\n\n`);
     md.appendMarkdown(`\`${keyword}\`\n\n${info.description}`);
+    return md;
+}
+
+function literalMarkdown(literal: string): vscode.MarkdownString {
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown('**built-in constant**\n\n');
+    md.appendMarkdown(`\`${literal}\`\n\n${LITERAL_DESCRIPTIONS[literal]}`);
     return md;
 }
 
@@ -200,7 +259,6 @@ function userSymbolType(
     lookupName: string,
     resolved: ResolvedDefinition,
 ): string {
-    if (lookupName.includes('.') || lookupName.includes('!')) return 'record field';
     if (resolved.symbolKind === 'parameter') return 'parameter';
     if (resolved.symbolKind === 'function' ||
         resolved.symbolKind === 'global-function' ||
@@ -211,16 +269,18 @@ function userSymbolType(
         /\b(?:atomic\s+)?function\b|->/.test(resolved.definitionLine)) {
         return 'function';
     }
+    if (lookupName.includes('.') || lookupName.includes('!')) return 'record field';
     return 'variable';
 }
 
 function isIsBoundArgument(node: SyntaxNode): boolean {
-    const argumentList = node.parent;
+    const expression = selectorExpression(node);
+    const argumentList = expression.parent;
     const call = argumentList?.type === 'argument_list' ? argumentList.parent : null;
     const functionNode = call?.type === 'call' ? call.childForFieldName('function') : null;
     return functionNode?.type === 'identifier' &&
         functionNode.text === 'IsBound' &&
-        argumentList?.namedChildren[0]?.id === node.id;
+        argumentList?.namedChildren[0]?.id === expression.id;
 }
 
 /**
@@ -279,15 +339,19 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         const offset = document.offsetAt(position);
         if (token.isCancellationRequested) return undefined;
         const tree = getDocumentTree(document);
-        const node = symbolNameNodeAt(tree.rootNode, offset);
+        const node = hoverSymbolNodeAt(tree.rootNode, offset);
         if (!node) {
             const keyword = keywordNodeAt(tree.rootNode, offset);
-            return keyword
-                ? new vscode.Hover(keywordMarkdown(keyword.text), this.rangeOf(document, keyword))
+            if (keyword) {
+                return new vscode.Hover(keywordMarkdown(keyword.text), this.rangeOf(document, keyword));
+            }
+            const literal = literalNodeAt(tree.rootNode, offset);
+            return literal
+                ? new vscode.Hover(literalMarkdown(literal.text), this.rangeOf(document, literal))
                 : undefined;
         }
 
-        const name = symbolLookupName(node);
+        const name = hoverLookupName(node);
 
         // Gate 2: GAP functions win over user defined ones.
         const systemNames = getFunctionNames();
@@ -305,6 +369,9 @@ export class GAPHoverProvider implements vscode.HoverProvider {
                 resolved = this.resolver.resolveWorkspaceDefinition(document, name);
             }
         }
+        if (!resolved && (name.includes('.') || name.includes('!')) && isCallCallee(node)) {
+            resolved = this.resolver.resolveWorkspaceDefinition(document, name);
+        }
         if (resolved) {
             return new vscode.Hover(
                 customMarkdown({
@@ -316,7 +383,7 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         }
 
         // Preserve the old fallback only for call-like function names.
-        if (functionNameNodeAt(tree.rootNode, offset)?.id === node.id) {
+        if (functionNameNodeAt(tree.rootNode, offset)?.id === node.id || isCallCallee(node)) {
             return new vscode.Hover(new vscode.MarkdownString(FALLBACK_TEXT), this.rangeOf(document, node));
         }
         return undefined;

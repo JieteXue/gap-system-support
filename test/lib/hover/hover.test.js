@@ -172,6 +172,7 @@ async function main() {
             'typed := function(parameter)',
             '  return parameter;',
             'end;',
+            'value := fail;',
             'f2 := { x -> x + 1 };',
         ].join('\n');
         const doc = makeDocument('classify.g', code, null);
@@ -194,6 +195,8 @@ async function main() {
         check('not keyword hovers', true, textOf(await hoverAt(provider, conditional, 'not ')).includes('Negates'));
         check('then keyword hovers', true, textOf(await hoverAt(provider, conditional, 'then')).includes('conditional branch'));
         check('fi keyword hovers', true, textOf(await hoverAt(provider, conditional, 'fi;')).includes('Ends a conditional'));
+        check('fail literal hovers', true,
+            textOf(await hoverAt(provider, doc, 'fail;')).includes('**built-in constant**'));
         // A position right after the name still hovers.
         check('definition name at word end still hovers', true, provider.provideHover(doc, { line: 0, character: 4 }, new CancellationTokenStub()) !== undefined);
     }
@@ -484,6 +487,40 @@ async function main() {
         const dynamicHover = await hoverAt(provider, dynamicDoc, 'CrossFileValue');
         check('IsBound guard finds a cross-file definition for a dynamic Read', true,
             textOf(dynamicHover).includes('**variable**'));
+
+        fs.writeFileSync(path.join(tmp, 'qualified-def.g'), [
+            'MAGNETIC_INTERNAL := rec();',
+            'MAGNETIC_INTERNAL.IsIntegralSquareMatrix := function(value)',
+            '  return true;',
+            'end;',
+        ].join('\n'));
+        const qualifiedCode = [
+            'if not MAGNETIC_INTERNAL.IsIntegralSquareMatrix(value) then',
+            'fi;',
+        ].join('\n');
+        const qualifiedDoc = makeDocument('qualified-use.g', qualifiedCode, tmp);
+        check('qualified call hovers from the left identifier', true,
+            textOf(await hoverAt(provider, qualifiedDoc, 'MAGNETIC_INTERNAL')).includes('**function**'));
+        check('qualified call hovers from the selector identifier', true,
+            textOf(await hoverAt(provider, qualifiedDoc, 'IsIntegralSquareMatrix')).includes('**function**'));
+        check('qualified call hovers from the dot', true,
+            textOf(await hoverAt(provider, qualifiedDoc, '.IsIntegralSquareMatrix')).includes('**function**'));
+
+        const qualifiedDefinitionCode = [
+            'MAGNETIC_INTERNAL.CheckFiniteMatrixGroup := function(group, name)',
+            'end;',
+        ].join('\n');
+        const qualifiedDefinitionDoc = makeDocument(
+            'qualified-definition.g',
+            qualifiedDefinitionCode,
+            tmp,
+        );
+        check('qualified definition hovers from the left identifier', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'MAGNETIC_INTERNAL')).includes('**function**'));
+        check('qualified definition hovers from the selector identifier', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'CheckFiniteMatrixGroup')).includes('**function**'));
+        check('qualified definition hovers from the dot', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, '.CheckFiniteMatrixGroup')).includes('**function**'));
         workspaceState.textDocuments.length = 0;
     } finally {
         workspaceState.folderPath = null;

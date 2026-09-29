@@ -571,6 +571,8 @@ export class GAPDefinitionResolver {
                 keep: boolean;
                 symbolKind: 'parameter' | 'variable' | 'function';
                 lookupName?: string;
+                matchStart?: number;
+                matchEnd?: number;
             }
         >();
         const kindPriority = { variable: 1, parameter: 2, function: 3 } as const;
@@ -642,6 +644,8 @@ export class GAPDefinitionResolver {
                             keep: !topLevelOnly || isTopLevel(selector),
                             symbolKind: 'variable',
                             lookupName: left!.text,
+                            matchStart: left!.startIndex,
+                            matchEnd: left!.endIndex,
                         });
                     }
                 }
@@ -651,7 +655,14 @@ export class GAPDefinitionResolver {
         collectRecordFields(rootNode);
 
         // Attach every definition to its innermost enclosing scope, as scoped.ts does.
-        for (const { node, keep, symbolKind, lookupName } of defNodes.values()) {
+        for (const {
+            node,
+            keep,
+            symbolKind,
+            lookupName,
+            matchStart,
+            matchEnd,
+        } of defNodes.values()) {
             if (!keep) continue;
             let scope = GLOBAL_SCOPE;
             let current: SyntaxNode | null = node.parent;
@@ -665,8 +676,8 @@ export class GAPDefinitionResolver {
             events.push({
                 kind: 'def',
                 name: lookupName ?? node.text,
-                offset: node.startIndex,
-                end: node.endIndex,
+                offset: matchStart ?? node.startIndex,
+                end: matchEnd ?? node.endIndex,
                 scope,
                 row: node.startPosition.row,
                 column: node.startPosition.column,
