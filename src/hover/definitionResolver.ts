@@ -2,6 +2,7 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { parseGapCode, getDocumentTree, isParserReady } from '../parser/gapParser';
 import { hasErrorAncestor, isTopLevel } from '../shared/treeUtils';
 import { ReadChainFileCache, resolveReadBaseDir, resolveReadTarget } from '../shared/readFileCache';
@@ -198,6 +199,13 @@ export class GAPDefinitionResolver {
             currentFilePath,
             true,
         );
+        if (candidates.length === 0 && baseDir) {
+            candidates.push(...this.scanWorkspaceSymbolDefinitions(
+                baseDir,
+                name,
+                currentFilePath,
+            ));
+        }
 
         const seen = new Set<string>();
         return candidates
@@ -223,6 +231,47 @@ export class GAPDefinitionResolver {
                 headerText: candidate.event.headerText,
                 name: candidate.event.name,
             }));
+    }
+
+    /** Find top-level user definitions in sibling GAP source files. */
+    private scanWorkspaceSymbolDefinitions(
+        baseDir: string,
+        name: string,
+        currentFilePath: string,
+    ): { event: Extract<FileEvent, { kind: 'def' }>; lines: string[]; filePath: string }[] {
+        const results: { event: Extract<FileEvent, { kind: 'def' }>; lines: string[]; filePath: string }[] = [];
+        const visited = new Set<string>();
+        const sourceExtensions = new Set(['.g', '.gd', '.gi', '.gap']);
+
+        const visit = (directory: string): void => {
+            let entries: fs.Dirent[];
+            try {
+                entries = fs.readdirSync(directory, { withFileTypes: true });
+            } catch {
+                return;
+            }
+            for (const entry of entries) {
+                if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'out') continue;
+                const filePath = path.join(directory, entry.name);
+                if (entry.isDirectory()) {
+                    visit(filePath);
+                    continue;
+                }
+                if (!entry.isFile() || !sourceExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+                if (filePath === currentFilePath || visited.has(filePath)) continue;
+                visited.add(filePath);
+                const read = this.fileCache.loadFile(filePath);
+                if (!read) continue;
+                for (const event of read.events) {
+                    if (event.kind === 'def' && event.name === name && event.scope === GLOBAL_SCOPE) {
+                        results.push({ event, lines: read.lines, filePath });
+                    }
+                }
+            }
+        };
+
+        visit(baseDir);
+        return results;
     }
 
     private scanAllSymbolDefinitions(

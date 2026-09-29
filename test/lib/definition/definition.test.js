@@ -456,6 +456,35 @@ async function main() {
             workspaceState.folderPath = null;
             fs.rmSync(tmp, { recursive: true, force: true });
         }
+
+        const workspaceTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-workspace-index-'));
+        try {
+            fs.writeFileSync(path.join(workspaceTmp, 'internal.g'), [
+                'MAGNETIC_INTERNAL.RepresentationByGenerators := function(generators, timeParity)',
+                '    return generators;',
+                'end;',
+            ].join('\n'));
+            workspaceState.folderPath = workspaceTmp;
+            const apiCode = [
+                'MagneticEquivalence.Representation.FromGenerators := function(generators, timeParity)',
+                '    return MAGNETIC_INTERNAL.RepresentationByGenerators(generators, timeParity);',
+                'end;',
+            ].join('\n');
+            const apiDoc = makeDocument('api.g', apiCode, workspaceTmp);
+            const workspaceDefinition = defineAt(
+                provider,
+                apiDoc,
+                'RepresentationByGenerators',
+                0,
+            );
+            check('dotted call resolves through the workspace index', true,
+                workspaceDefinition !== undefined &&
+                workspaceDefinition.uri.fsPath === path.join(workspaceTmp, 'internal.g') &&
+                workspaceDefinition.range.start.line === 0);
+        } finally {
+            workspaceState.folderPath = null;
+            fs.rmSync(workspaceTmp, { recursive: true, force: true });
+        }
     }
 
     summary();
