@@ -188,14 +188,30 @@ export class GAPDefinitionResolver {
         const tree = getDocumentTree(document, text);
         if (!tree) return null;
 
-        const collected = this.collectEvents(tree.rootNode, false);
+        const cacheKey = document.uri.toString();
+        let events: FileEvent[];
+        const cached = this.documentCache.peek(cacheKey);
+        if (cached && cached.version === document.version && cached.tree === tree) {
+            this.documentCache.touch(cacheKey, cached);
+            events = cached.events;
+        } else {
+            const collected = this.collectEvents(tree.rootNode, false);
+            events = collected.events.sort((left, right) => left.offset - right.offset);
+            this.documentCache.set(cacheKey, {
+                version: document.version,
+                tree,
+                events,
+                scopeByStart: collected.scopeByStart,
+                lines: text.split(/\r?\n/),
+            });
+        }
         const offset = document.offsetAt(position);
         const baseDir = resolveReadBaseDir(document);
         if (!baseDir) return null;
         const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
         const visited = new Set<string>();
 
-        for (const event of collected.events) {
+        for (const event of events) {
             if (event.kind !== 'read' || event.offset <= offset) continue;
             const target = resolveReadTarget(event.pathText, baseDir);
             if (!target || visited.has(target)) continue;

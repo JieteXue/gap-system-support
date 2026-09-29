@@ -6,10 +6,13 @@ import { getFunctionNames } from '../completion/dataManager';
 import { GAPDefinitionResolver, ResolvedDefinition } from './definitionResolver';
 import { definitionPathLink } from './format';
 import { getHelpState } from '../help/helpData';
+import type { HelpEntry } from '../help/indexData';
 import { simpleString } from '../help/simpleString';
 import { functionNameNodeAt, symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
 import { resolveHelpPath } from '../path';
 import { BUILTIN_FUNCTION_NAMES } from '../completion/builtinNames';
+import { LruCache } from '../shared/lruCache';
+import { HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES } from '../limits';
 import type { SyntaxNode } from 'web-tree-sitter';
 import * as fs from 'fs';
 
@@ -82,7 +85,11 @@ interface BuiltinHelp {
     description?: string;
 }
 
-const helpDescriptionCache = new Map<string, string | undefined>();
+const helpDescriptionCache = new LruCache<string, { description?: string }>({
+    maxEntries: HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES,
+});
+let indexedHelpEntries: HelpEntry[] | null = null;
+let functionHelpIndex = new Map<string, HelpEntry[]>();
 
 function decodeHtml(text: string): string {
     return text
@@ -101,7 +108,11 @@ function decodeHtml(text: string): string {
 function readHelpDescription(filePath: string, anchor: string): string | undefined {
     if (!filePath || !anchor || !fs.existsSync(filePath)) return undefined;
     const cacheKey = `${filePath}#${anchor}`;
-    if (helpDescriptionCache.has(cacheKey)) return helpDescriptionCache.get(cacheKey);
+    const cached = helpDescriptionCache.peek(cacheKey);
+    if (cached) {
+        helpDescriptionCache.touch(cacheKey, cached);
+        return cached.description;
+    }
 
     let description: string | undefined;
     try {
@@ -118,23 +129,44 @@ function readHelpDescription(filePath: string, anchor: string): string | undefin
     } catch {
         // A missing or unreadable documentation file should not disable Hover.
     }
-    helpDescriptionCache.set(cacheKey, description);
+    helpDescriptionCache.set(cacheKey, { description });
     return description;
 }
 
-function findBuiltinHelp(name: string): BuiltinHelp | undefined {
-    const key = simpleString(name);
+function getFunctionHelpCandidates(name: string): HelpEntry[] {
     const entries = getHelpState().entries;
-    const candidates = entries.filter(entry =>
-        entry.type === 'F' &&
-        (entry.key === key || entry.key === key.toLowerCase() || entry.display === name));
-    const exact = candidates.sort((a, b) => {
-        const score = (entry: typeof a): number =>
+    if (entries !== indexedHelpEntries) {
+        const nextIndex = new Map<string, HelpEntry[]>();
+        for (const entry of entries) {
+            if (entry.type !== 'F' && !entry.display) continue;
+            const keys = new Set([entry.key, simpleString(entry.display)]);
+            for (const key of keys) {
+                if (!key) continue;
+                const bucket = nextIndex.get(key);
+                if (bucket) bucket.push(entry);
+                else nextIndex.set(key, [entry]);
+            }
+        }
+        indexedHelpEntries = entries;
+        functionHelpIndex = nextIndex;
+    }
+    return functionHelpIndex.get(simpleString(name)) ?? [];
+}
+
+function findBuiltinHelp(name: string): BuiltinHelp | undefined {
+    let exact: HelpEntry | undefined;
+    let exactScore = -1;
+    for (const entry of getFunctionHelpCandidates(name)) {
+        if (entry.type !== 'F' && entry.display !== name) continue;
+        const score =
             (entry.display === name ? 4 : 0) +
             (entry.book === 'Reference' ? 2 : 0) +
             (entry.filePath.startsWith('/doc/') ? 1 : 0);
-        return score(b) - score(a);
-    })[0];
+        if (score > exactScore) {
+            exact = entry;
+            exactScore = score;
+        }
+    }
     if (!exact) return undefined;
     const config = vscode.workspace.getConfiguration('gap');
     const docPath = (config.get<string>('docPath') || '').trim();
@@ -146,10 +178,9 @@ function findBuiltinHelp(name: string): BuiltinHelp | undefined {
     };
 }
 
-function systemMarkdown(name: string): vscode.MarkdownString {
+function systemMarkdown(name: string, help?: BuiltinHelp): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: ['gap.searchHelpTerm'] };
-    const help = findBuiltinHelp(name);
     md.appendMarkdown('**built-in function**\n\n');
     md.appendMarkdown(`\`${help?.display || `${name}(...)`}\`\n\n`);
     if (help?.description) md.appendMarkdown(`${help.description}\n\n`);
@@ -262,7 +293,7 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         const systemNames = getFunctionNames();
         const help = findBuiltinHelp(name);
         if (systemNames?.has(name) || BUILTIN_FUNCTION_NAMES.has(name) || help) {
-            return new vscode.Hover(systemMarkdown(name), this.rangeOf(document, node));
+            return new vscode.Hover(systemMarkdown(name, help), this.rangeOf(document, node));
         }
 
         // Gate 3: user-defined symbols resolved through the Read chain.
