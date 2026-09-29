@@ -36,6 +36,7 @@ installMock();
 
 const { initGapParser } = require('../../../out/parser/gapParser');
 const { GAPDefinitionProvider } = require('../../../out/definition/definitionProvider');
+const { GAPReferenceProvider } = require('../../../out/references/referenceProvider');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const QUERY_PATH = path.join(ROOT, 'queries', 'completion.scm');
@@ -86,6 +87,10 @@ function defineAt(provider, doc, needle, occurrence = 0) {
         new CancellationTokenStub(),
     );
     return Array.isArray(result) ? result[0] : result;
+}
+
+function definitionStartLine(location) {
+    return (location.range || location.targetRange).start.line;
 }
 
 async function main() {
@@ -192,6 +197,37 @@ async function main() {
             `${loc.targetSelectionRange.start.character}:${loc.targetSelectionRange.end.character}`);
         check('call site still returns a plain Location', true,
             defineAt(provider, doc, 'ownfn();').targetRange === undefined);
+
+        const referenceProvider = new GAPReferenceProvider(QUERY_PATH);
+        const clickableProvider = new GAPDefinitionProvider(QUERY_PATH, referenceProvider);
+        const clickableCode = [
+            'target := function()',
+            'end;',
+            'target();',
+            'target();',
+        ].join('\n');
+        const clickableDocument = makeDocument('clickable.g', clickableCode, null);
+        const clickTargets = await clickableProvider.provideDefinition(
+            clickableDocument,
+            positionOf(clickableCode, 'target :='),
+            new CancellationTokenStub(),
+        );
+        check('definition click returns references for the Peek widget', [2, 3],
+            clickTargets.map(location => location.range.start.line));
+        check('definition click omits the clicked definition', false,
+            clickTargets.some(location => location.range.start.line === 0));
+
+        const unusedCode = 'unused := function()\nend;\n';
+        const unusedDocument = makeDocument('unused.g', unusedCode, null);
+        const unusedTarget = await clickableProvider.provideDefinition(
+            unusedDocument,
+            positionOf(unusedCode, 'unused :='),
+            new CancellationTokenStub(),
+        );
+        check('definition without references falls back to itself', true,
+            Array.isArray(unusedTarget) &&
+            unusedTarget.length === 1 &&
+            unusedTarget[0].targetRange.start.line === 0);
     }
 
     section('7. Cursor at the end of the name (right-click positions)');
@@ -422,7 +458,7 @@ async function main() {
         );
         check('InstallValue target is indexed as an implementation', true,
             Array.isArray(installedValue) &&
-            installedValue.some(location => location.range.start.line === 8));
+            installedValue.some(location => definitionStartLine(location) === 8));
         check('InstallOtherMethod target resolves', true,
             defineAt(provider, doc, 'declaredVariable', 4) !== undefined);
         const dottedMethod = provider.provideDefinition(
@@ -477,10 +513,59 @@ async function main() {
             'MagneticEquivalence.Matrix.Block(1);',
         ].join('\n');
         const nestedRecordDoc = makeDocument('nested-record.g', nestedRecordCode, null);
+        check('nested record field resolves from its definition name', 2,
+            definitionStartLine(defineAt(provider, nestedRecordDoc, 'Block :=')));
         check('nested record selector resolves the outer field', 1,
             defineAt(provider, nestedRecordDoc, 'Matrix.', 0).range.start.line);
         check('nested record selector resolves the inner field', 2,
             defineAt(provider, nestedRecordDoc, 'Block(', 0).range.start.line);
+
+        const nestedReferenceProvider = new GAPReferenceProvider(QUERY_PATH);
+        const nestedClickableProvider = new GAPDefinitionProvider(
+            QUERY_PATH,
+            nestedReferenceProvider,
+        );
+        const nestedClickTargets = await nestedClickableProvider.provideDefinition(
+            nestedRecordDoc,
+            positionOf(nestedRecordCode, 'Block :='),
+            new CancellationTokenStub(),
+        );
+        check('nested record definition click returns its usage', [7],
+            nestedClickTargets.map(location => location.range.start.line));
+
+        const directRecordCode = [
+            'A := rec(',
+            '    Print := function()',
+            '    end',
+            ');',
+            'A.Print();',
+        ].join('\n');
+        const directRecordDoc = makeDocument('direct-record.g', directRecordCode, null);
+        check('direct rec field resolves from its definition name', 1,
+            definitionStartLine(defineAt(provider, directRecordDoc, 'Print :=')));
+        const directClickTargets = await nestedClickableProvider.provideDefinition(
+            directRecordDoc,
+            positionOf(directRecordCode, 'Print :='),
+            new CancellationTokenStub(),
+        );
+        check('direct rec definition click omits itself', [4],
+            directClickTargets.map(location => location.range.start.line));
+
+        const dottedRecordCode = [
+            'MagneticEquivalence := rec(Matrix := rec());',
+            'MagneticEquivalence.Matrix.Block := function(x)',
+            '    return x;',
+            'end;',
+            'MagneticEquivalence.Matrix.Block(1);',
+        ].join('\n');
+        const dottedRecordDoc = makeDocument('dotted-record.g', dottedRecordCode, null);
+        const dottedClickTargets = await nestedClickableProvider.provideDefinition(
+            dottedRecordDoc,
+            positionOf(dottedRecordCode, 'Block :='),
+            new CancellationTokenStub(),
+        );
+        check('dotted rec definition click omits itself', [4],
+            dottedClickTargets.map(location => location.range.start.line));
 
         const dottedAssignmentCode = [
             'MagneticEquivalence := rec(Matrix := rec());',

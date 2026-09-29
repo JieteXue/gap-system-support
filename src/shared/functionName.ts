@@ -153,9 +153,37 @@ export function symbolNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode |
     return declarationStringNodeAt(root, offset);
 }
 
+/** Build the qualified name of a field declared inside an assigned rec(...). */
+export function recordEntryLookupName(recordEntry: SyntaxNode): string | null {
+    let current: SyntaxNode | null = recordEntry;
+    const fields: string[] = [];
+    while (current && current.type !== 'source_file') {
+        if (current.type === 'record_entry') {
+            const left = current.childForFieldName('left');
+            if (left?.type !== 'identifier') return null;
+            fields.unshift(left.text);
+        }
+        if (current.type === 'assignment_statement') {
+            const left = current.childForFieldName('left');
+            if (!left || (left.type !== 'identifier' &&
+                left.type !== 'record_selector' &&
+                left.type !== 'component_selector')) {
+                return null;
+            }
+            return [left.text, ...fields].join('.');
+        }
+        current = current.parent;
+    }
+    return null;
+}
+
 /** Return the lookup key for a symbol, preserving record/component paths. */
 export function symbolLookupName(node: SyntaxNode): string {
     const parent = node.parent;
+    if (parent?.type === 'record_entry' &&
+        parent.childForFieldName('left')?.id === node.id) {
+        return recordEntryLookupName(parent) ?? node.text;
+    }
     if (parent &&
         (parent.type === 'record_selector' || parent.type === 'component_selector') &&
         parent.childForFieldName('selector')?.id === node.id) {

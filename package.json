@@ -35,6 +35,11 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configurationDefaults": {
+      "[gap]": {
+        "editor.definitionLinkOpensInPeek": true
+      }
+    },
     "languages": [
       {
         "id": "gap",

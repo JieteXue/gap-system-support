@@ -13,7 +13,8 @@
 - **语义高亮与语法诊断**：基于 `tree-sitter-gap`。
 - **代码补全**：提供 GAP 常量、关键字、语句结构和 GAP 函数的补全（包括通过 `Read` 加载的其他 GAP 文件中的函数）。
 - **悬停提示**：将鼠标悬停在函数名上时，GAP 函数会显示帮助链接；自定义函数则显示定义行和 `##` 注释。
-- **转到定义**：为自定义函数提供 VS Code 原生的定义跳转。
+- **定义导航**：为可静态识别的 GAP 自定义符号提供 VS Code 原生的转到定义与 Peek Definition。
+- **引用导航**：`Command+点击` 定义可打开 Peek References，也可使用原生的查找所有引用（`Shift+F12`）；结果不包含当前点击的这一条，没有引用时则回退到定义自身。
 - **运行 GAP 代码**：在 VS Code 集成终端中运行当前 GAP 文件，并支持配置 GAP 命令行选项。
 - **帮助系统**：内置 GAP 帮助搜索，支持两种搜索模式（可在设置或 Quick Pick 搜索框中随时切换），并可按书籍（books）过滤结果。
   - **prefix**：对应 GAP 中的 `?topic`
@@ -66,7 +67,7 @@ source ~/.bashrc
 
 <img src="./images/allsubgroups.png" alt="语言模型工具演示" />
 
-### 2. 补全、悬停和转到定义
+### 2. 补全、悬停、定义与引用导航
 
 <img src="./images/completion-hover-go.gif" alt="代码编辑演示" />
 

@@ -8,6 +8,7 @@ import { hasErrorAncestor, isTopLevel } from '../shared/treeUtils';
 import { ReadChainFileCache, resolveReadBaseDir, resolveReadTarget } from '../shared/readFileCache';
 import { LruCache } from '../shared/lruCache';
 import { LazyQuery } from '../shared/lazyQuery';
+import { recordEntryLookupName } from '../shared/functionName';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
 import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT } from '../limits';
 
@@ -452,28 +453,6 @@ export class GAPDefinitionResolver {
 
         // Record fields are definitions too. They are intentionally collected
         // from the AST because completion.scm only models lexical variables.
-        const assignedRecordRoot = (node: SyntaxNode): string | null => {
-            let current: SyntaxNode | null = node;
-            const fields: string[] = [];
-            while (current && current.type !== 'source_file') {
-                if (current.type === 'record_entry') {
-                    const left = current.childForFieldName('left');
-                    if (left?.type !== 'identifier') return null;
-                    fields.unshift(left.text);
-                }
-                if (current.type === 'assignment_statement') {
-                    const left = current.childForFieldName('left');
-                    if (!left || (left.type !== 'identifier' &&
-                        left.type !== 'record_selector' &&
-                        left.type !== 'component_selector')) {
-                        return null;
-                    }
-                    return [left.text, ...fields].join('.');
-                }
-                current = current.parent;
-            }
-            return null;
-        };
         const collectRecordFields = (node: SyntaxNode): void => {
             if (node.type === 'record_entry') {
                 const left = node.childForFieldName('left');
@@ -485,7 +464,7 @@ export class GAPDefinitionResolver {
                             node: left,
                             keep: !topLevelOnly || isTopLevel(left),
                             symbolKind: 'variable',
-                            lookupName: assignedRecordRoot(node) ?? left.text,
+                            lookupName: recordEntryLookupName(node) ?? left.text,
                         });
                     }
                 }
