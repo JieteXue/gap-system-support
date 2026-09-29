@@ -46,6 +46,16 @@ interface EventFile {
     lines: string[];
 }
 
+export type DefinitionSymbolKind =
+    | 'parameter'
+    | 'variable'
+    | 'function'
+    | 'global-function'
+    | 'operation'
+    | 'method'
+    | 'attribute'
+    | 'global';
+
 /** The resolved definition shown in a hover. */
 export interface ResolvedDefinition {
     /** The trimmed definition line. */
@@ -58,6 +68,8 @@ export interface ResolvedDefinition {
     row: number;
     /** Column of the definition name, zero-based. */
     column: number;
+    /** Static symbol category when available. */
+    symbolKind?: DefinitionSymbolKind;
 }
 
 interface WorkspaceSymbolCacheEntry {
@@ -136,7 +148,7 @@ export class GAPDefinitionResolver {
         // Phase 0: hovering the definition's own name shows that definition.
         for (const event of events) {
             if (event.kind === 'def' && event.name === name && event.offset <= offset && offset <= event.end) {
-                return this.toDefinition({ lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name });
+                return this.toDefinition({ lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name, symbolKind: event.symbolKind });
             }
         }
 
@@ -148,7 +160,7 @@ export class GAPDefinitionResolver {
         );
         const scopedHit = this.pickLatestByName(scoped, name);
         if (scopedHit) {
-            return this.toDefinition({ lines, row: scopedHit.row, column: scopedHit.column, filePath: currentFilePath, headerText: scopedHit.headerText, name: scopedHit.name });
+            return this.toDefinition({ lines, row: scopedHit.row, column: scopedHit.column, filePath: currentFilePath, headerText: scopedHit.headerText, name: scopedHit.name, symbolKind: scopedHit.symbolKind });
         }
 
         // Phase 2: global fallback over Read chains and remaining global events.
@@ -247,6 +259,7 @@ export class GAPDefinitionResolver {
                 filePath: candidate.filePath,
                 headerText: candidate.event.headerText,
                 name: candidate.event.name,
+                symbolKind: candidate.event.symbolKind,
             }));
     }
 
@@ -391,12 +404,20 @@ export class GAPDefinitionResolver {
         baseDir: string | null,
         visited: Set<string>,
         currentFilePath: string,
-    ): { lines: string[]; row: number; column: number; filePath: string; headerText: string | null; name: string } | null {
+    ): {
+        lines: string[];
+        row: number;
+        column: number;
+        filePath: string;
+        headerText: string | null;
+        name: string;
+        symbolKind: DefinitionSymbolKind;
+    } | null {
         for (let i = events.length - 1; i >= 0; i--) {
             const event = events[i];
             if (event.kind === 'def') {
                 if (names.has(event.name)) {
-                    return { lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name };
+                    return { lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name, symbolKind: event.symbolKind };
                 }
             } else if (baseDir) {
                 const target = resolveReadTarget(event.pathText, baseDir);
@@ -420,6 +441,7 @@ export class GAPDefinitionResolver {
         filePath: string;
         headerText: string | null;
         name: string;
+        symbolKind?: DefinitionSymbolKind;
     }): ResolvedDefinition {
         const rawLine = (start.lines[start.row] ?? '').trim();
         // The display line is `name := header` (e.g. `a := function(x, y)`).
@@ -434,7 +456,14 @@ export class GAPDefinitionResolver {
             commentLines.push(line.replace(/^#+ ?/, ''));
         }
         commentLines.reverse();
-        return { definitionLine, commentLines, filePath: start.filePath, row: start.row, column: start.column };
+        return {
+            definitionLine,
+            commentLines,
+            filePath: start.filePath,
+            row: start.row,
+            column: start.column,
+            symbolKind: start.symbolKind,
+        };
     }
 
     /** Collect definition and Read events plus the scope index for one parsed file. */
