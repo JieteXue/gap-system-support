@@ -216,6 +216,18 @@ async function main() {
             clickTargets.map(location => location.range.start.line));
         check('definition click omits the clicked definition', false,
             clickTargets.some(location => location.range.start.line === 0));
+
+        const unusedCode = 'unused := function()\nend;\n';
+        const unusedDocument = makeDocument('unused.g', unusedCode, null);
+        const unusedTarget = await clickableProvider.provideDefinition(
+            unusedDocument,
+            positionOf(unusedCode, 'unused :='),
+            new CancellationTokenStub(),
+        );
+        check('definition without references falls back to itself', true,
+            Array.isArray(unusedTarget) &&
+            unusedTarget.length === 1 &&
+            unusedTarget[0].targetRange.start.line === 0);
     }
 
     section('7. Cursor at the end of the name (right-click positions)');

@@ -2,7 +2,7 @@
 
 1. Add Find All References and Peek References for statically recognizable GAP symbols across workspace files
 2. Preserve lexical scope and qualified record/component paths when finding references
-3. Open Peek References directly when command-clicking a definition and omit the selected occurrence
+3. Open Peek References directly when command-clicking a definition, omit the selected occurrence, and fall back to the definition itself when it has no references
 
 ## 0.3.5
 

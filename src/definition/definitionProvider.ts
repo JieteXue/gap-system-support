@@ -54,34 +54,21 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
                 position.character <= item.column + node.text.length;
         });
         if (selfDefinition) {
+            const selfLink = this.selfDefinitionLink(
+                document,
+                position,
+                node.text.length,
+                selfDefinition,
+            );
             if (this.referenceProvider) {
                 return this.referenceProvider.provideReferences(
                     document,
                     position,
                     { includeDeclaration: true },
                     token,
-                ).then(locations => locations.length > 0 ? locations : undefined);
+                ).then(locations => locations.length > 0 ? locations : [selfLink]);
             }
-            const uri = selfDefinition.filePath === ''
-                ? document.uri
-                : vscode.Uri.file(selfDefinition.filePath);
-            const zeroCharacter = position.character === selfDefinition.column
-                ? selfDefinition.column + node.text.length
-                : selfDefinition.column;
-            return [{
-                targetUri: uri,
-                targetRange: new vscode.Range(
-                    new vscode.Position(selfDefinition.row, selfDefinition.column),
-                    new vscode.Position(
-                        selfDefinition.row,
-                        selfDefinition.column + node.text.length,
-                    ),
-                ),
-                targetSelectionRange: new vscode.Range(
-                    new vscode.Position(selfDefinition.row, zeroCharacter),
-                    new vscode.Position(selfDefinition.row, zeroCharacter),
-                ),
-            } as vscode.LocationLink];
+            return [selfLink];
         }
 
         return resolved.map(item => {
@@ -99,5 +86,30 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
                 ),
             );
         });
+    }
+
+    private selfDefinitionLink(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        nameLength: number,
+        definition: { filePath: string; row: number; column: number },
+    ): vscode.LocationLink {
+        const uri = definition.filePath === ''
+            ? document.uri
+            : vscode.Uri.file(definition.filePath);
+        const zeroCharacter = position.character === definition.column
+            ? definition.column + nameLength
+            : definition.column;
+        return {
+            targetUri: uri,
+            targetRange: new vscode.Range(
+                new vscode.Position(definition.row, definition.column),
+                new vscode.Position(definition.row, definition.column + nameLength),
+            ),
+            targetSelectionRange: new vscode.Range(
+                new vscode.Position(definition.row, zeroCharacter),
+                new vscode.Position(definition.row, zeroCharacter),
+            ),
+        };
     }
 }
