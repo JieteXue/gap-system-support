@@ -12,7 +12,7 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
 
 - **Semantic highlighting and syntax diagnostics**: based on `tree-sitter-gap`.
 - **Code completion**: provides completion for GAP constants, keywords, statement structures, and GAP functions (including functions from other GAP files loaded via `Read`).
-- **Hover hints**: hovering over a function name shows a help link for GAP functions; for user defined functions it shows the definition line and the `##` comments.
+- **Hover information**: hovering over a symbol shows its static category, such as `function`, `variable`, `parameter`, or `record field`. Built-in functions show their signature, a short documentation summary when the GAP documentation is configured, and a link to GAP Help. GAP language keywords such as `if`, `not`, `then`, and `fi` show concise syntax descriptions.
 - **Definition navigation**: native Go to Definition and Peek Definition support for statically recognizable user-defined GAP symbols.
 - **Reference navigation**: `Command+click` a definition with references to open the native Peek view, or use native Find All References (`Shift+F12`). The selected occurrence is omitted; definitions without references jump directly to themselves.
 - **Running GAP code**: runs the current GAP file in the VS Code integrated terminal, with configurable GAP command line options.
@@ -138,6 +138,13 @@ Run the tests:
 
 ```bash
 npm test
+```
+
+To build a VSIX for manual testing in an Extension Development Host or a local
+VS Code installation:
+
+```bash
+npx @vscode/vsce package
 ```
 
 Then press `F5` to start debugging.

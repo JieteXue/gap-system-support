@@ -4,6 +4,9 @@
 2. Preserve lexical scope and qualified record/component paths when finding references
 3. Open Peek References when command-clicking a definition with references, omit the selected occurrence, and navigate directly to unreferenced definitions
 4. Resolve qualified paths when navigation starts from fields declared inside nested `rec(...)` values
+5. Add Hover information for GAP symbol categories, language keywords, and built-in functions
+6. Resolve guarded symbols across cross-file and dynamic `Read(...)` loaders
+7. Cache Hover help lookups and documentation summaries
 
 ## 0.3.5
 
