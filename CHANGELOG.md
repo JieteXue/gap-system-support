@@ -1,15 +1,9 @@
 ## Unreleased
 
-1. Add Find All References and Peek References for statically recognizable GAP symbols across workspace files
-2. Preserve lexical scope and qualified record/component paths when finding references
-3. Open Peek References when command-clicking a definition with references, omit the selected occurrence, and navigate directly to unreferenced definitions
-4. Resolve qualified paths when navigation starts from fields declared inside nested `rec(...)` values
-5. Add Hover information for GAP symbol categories, language keywords, and built-in functions
-6. Resolve guarded symbols across cross-file and dynamic `Read(...)` loaders
-7. Cache Hover help lookups and documentation summaries
-8. Show concise Hover descriptions for assignment, function, comparison, arithmetic, power, range, and variadic operators
-9. Add Hover information for the `;` statement terminator and syntax-highlight all GAP code shown inside Hover
-10. Use a theme-visible TextMate scope for operators rendered inside Hover
+1. Expand Go to Definition across lexical symbols, qualified record/component paths, GAP declarations, bindings, installations, and multiple method implementations
+2. Add workspace Find All References and native Peek behavior with lexical scope, complete qualified-name matching, selected-occurrence exclusion, and direct navigation for definitions without references
+3. Add static Hover categories, built-in help summaries, language keyword/operator/punctuation descriptions, cross-file guarded lookup, and syntax-highlighted GAP snippets
+4. Cache parsed files, workspace symbol/reference indexes, help lookups, and documentation summaries to keep repeated editor requests responsive
 
 ## 0.3.5
 

@@ -38,7 +38,7 @@ full GAP Help entry. The `gap.docPath` and `gap.pkgPath` settings are needed
 to read the documentation paragraph; the basic built-in-function Hover still
 works without them.
 
-## Language Keywords
+## Language Syntax
 
 Common GAP keywords and operators have concise syntax descriptions. This
 includes conditional keywords such as `if`, `then`, `elif`, `else`, and `fi`,

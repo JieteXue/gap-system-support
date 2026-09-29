@@ -1,7 +1,9 @@
 # Definition Navigation Coverage
 
 This document records the statically recognizable GAP definitions supported by
-the VS Code definition provider.
+the VS Code definition and reference providers. For editor behavior, Peek
+rules, caching, and verification, see
+[Definition And Reference Navigation](navigation.md).
 
 ## Lexical Definitions
 

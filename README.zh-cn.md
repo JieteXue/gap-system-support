@@ -14,7 +14,7 @@
 - **代码补全**：提供 GAP 常量、关键字、语句结构和 GAP 函数的补全（包括通过 `Read` 加载的其他 GAP 文件中的函数）。
 - **悬停信息**：将鼠标悬停在符号上时，会显示其静态类别，例如 `function`、`variable`、`parameter` 或 `record field`。内置函数会显示函数签名；配置 GAP 文档路径后，还会显示简短的文档摘要和 GAP 帮助链接。关键字、运算符和语句终止符 `;` 会在 Hover 中以语法高亮代码片段显示，并附带简短说明。
 - **定义导航**：为可静态识别的 GAP 自定义符号提供 VS Code 原生的转到定义与 Peek Definition。
-- **引用导航**：`Command+点击` 有引用的定义可打开原生 Peek，也可使用原生的查找所有引用（`Shift+F12`）；结果不包含当前点击的这一条，没有引用时直接跳转到定义自身。
+- **引用导航**：在 macOS 上使用 `Command+点击`，在 Windows/Linux 上使用 `Ctrl+点击`；有引用的定义会打开原生 Peek，也可使用原生的查找所有引用（`Shift+F12`）。结果不包含当前点击的这一条，没有引用时直接跳转到定义自身。
 - **运行 GAP 代码**：在 VS Code 集成终端中运行当前 GAP 文件，并支持配置 GAP 命令行选项。
 - **帮助系统**：内置 GAP 帮助搜索，支持两种搜索模式（可在设置或 Quick Pick 搜索框中随时切换），并可按书籍（books）过滤结果。
   - **prefix**：对应 GAP 中的 `?topic`
@@ -126,6 +126,12 @@ source ~/.bashrc
 这些命令也会出现在 GAP 文件的编辑器上下文菜单（右键菜单）中，其中 `GAP: Search GAP Help` 和 `GAP: Run GAP File` 位于菜单顶层，其余命令聚合在 **More GAP Commands** 子菜单中。
 
 ## 开发
+
+实现与覆盖范围文档：
+
+- [定义与引用导航](docs/navigation.md)
+- [定义导航覆盖范围](docs/definition-navigation-coverage.md)
+- [Hover 信息](docs/hover-information.md)
 
 首先安装依赖并编译 TypeScript 源码：
 
