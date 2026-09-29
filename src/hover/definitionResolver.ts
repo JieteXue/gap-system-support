@@ -417,6 +417,23 @@ export class GAPDefinitionResolver {
                     }
                 }
             }
+            if (node.type === 'assignment_statement') {
+                const left = node.childForFieldName('left');
+                const selector = left?.type === 'record_selector'
+                    ? left.childForFieldName('selector')
+                    : null;
+                if (selector?.type === 'identifier' && !hasErrorAncestor(selector)) {
+                    const key = `${selector.startIndex}:${selector.endIndex}`;
+                    const existing = defNodes.get(key);
+                    if (!existing || kindPriority.variable > kindPriority[existing.symbolKind]) {
+                        defNodes.set(key, {
+                            node: selector,
+                            keep: !topLevelOnly || isTopLevel(selector),
+                            symbolKind: 'variable',
+                        });
+                    }
+                }
+            }
             for (const child of node.namedChildren) collectRecordFields(child);
         };
         collectRecordFields(rootNode);

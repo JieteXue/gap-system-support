@@ -418,6 +418,17 @@ async function main() {
         check('nested record selector resolves the inner field', 2,
             defineAt(provider, nestedRecordDoc, 'Block(', 0).range.start.line);
 
+        const dottedAssignmentCode = [
+            'MagneticEquivalence := rec(Matrix := rec());',
+            'MagneticEquivalence.Matrix.Block := function(x)',
+            '    return x;',
+            'end;',
+            'MagneticEquivalence.Matrix.Block(1);',
+        ].join('\n');
+        const dottedAssignmentDoc = makeDocument('dotted-assignment.g', dottedAssignmentCode, null);
+        check('dotted record assignment resolves to its definition', 1,
+            defineAt(provider, dottedAssignmentDoc, 'Block(', 0).range.start.line);
+
         const shadowCode = [
             'value := 1;',
             'f := function(value)',
