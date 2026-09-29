@@ -9,6 +9,7 @@ import { getHelpState } from '../help/helpData';
 import { simpleString } from '../help/simpleString';
 import { functionNameNodeAt, symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
 import { resolveHelpPath } from '../path';
+import { BUILTIN_FUNCTION_NAMES } from '../completion/builtinNames';
 import type { SyntaxNode } from 'web-tree-sitter';
 import * as fs from 'fs';
 
@@ -99,12 +100,12 @@ function systemMarkdown(name: string): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: ['gap.searchHelpTerm'] };
     const help = findBuiltinHelp(name);
-    md.appendMarkdown('**GAP built-in function**\n\n');
+    md.appendMarkdown('**built-in function**\n\n');
     md.appendMarkdown(`\`${help?.display || `${name}(...)`}\`\n\n`);
     if (help?.description) md.appendMarkdown(`${help.description}\n\n`);
     md.appendMarkdown(help
         ? `Defined in the ${help.book} help book. `
-        : 'A function provided by GAP. ');
+        : 'Provided by the language runtime. ');
     md.appendMarkdown('See more information in ');
     md.appendMarkdown(
         `[GAP Help](command:gap.searchHelpTerm?${encodeURIComponent(JSON.stringify([name]))})`
@@ -132,6 +133,15 @@ function userSymbolType(
     return 'variable';
 }
 
+function isIsBoundArgument(node: SyntaxNode): boolean {
+    const argumentList = node.parent;
+    const call = argumentList?.type === 'argument_list' ? argumentList.parent : null;
+    const functionNode = call?.type === 'call' ? call.childForFieldName('function') : null;
+    return functionNode?.type === 'identifier' &&
+        functionNode.text === 'IsBound' &&
+        argumentList?.namedChildren[0]?.id === node.id;
+}
+
 /**
  * Render the hover for a user defined function.
  * Shows the title, a code block, and the comment lines.
@@ -142,7 +152,7 @@ function customMarkdown(
 ): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: ['gap.goToDefinition'] };
-    md.appendMarkdown(`**GAP ${resolved.symbolType || 'symbol'}**\n\n`);
+    md.appendMarkdown(`**${resolved.symbolType || 'symbol'}**\n\n`);
     md.appendCodeblock(resolved.definitionLine, 'gap');
     if (resolved.commentLines.length > 0) {
         // A separator between the code block and the comments.
@@ -195,12 +205,16 @@ export class GAPHoverProvider implements vscode.HoverProvider {
 
         // Gate 2: GAP functions win over user defined ones.
         const systemNames = getFunctionNames();
-        if (systemNames?.has(name)) {
+        if (systemNames?.has(name) || BUILTIN_FUNCTION_NAMES.has(name)) {
             return new vscode.Hover(systemMarkdown(name), this.rangeOf(document, node));
         }
 
         // Gate 3: user-defined symbols resolved through the Read chain.
-        const resolved = this.resolver.resolveDefinition(document, position, name);
+        let resolved = this.resolver.resolveDefinition(document, position, name);
+        // A loader may use a symbol in an IsBound guard before Read() loads its definition.
+        if (!resolved && isIsBoundArgument(node)) {
+            resolved = this.resolver.resolveDefinitionFromFutureReads(document, position, name);
+        }
         if (resolved) {
             return new vscode.Hover(
                 customMarkdown({

@@ -172,6 +172,59 @@ export class GAPDefinitionResolver {
         return start ? this.toDefinition(start) : null;
     }
 
+    /**
+     * Resolve a symbol from Read calls that occur later in the current file.
+     * This is useful for guards such as `if not IsBound(name) then`, where the
+     * guarded bootstrap intentionally loads the definition after the check.
+     */
+    resolveDefinitionFromFutureReads(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        name: string,
+    ): ResolvedDefinition | null {
+        if (!isParserReady()) return null;
+        const text = document.getText();
+        if (text.length > READ_CONTENT_LIMIT) return null;
+        const tree = getDocumentTree(document, text);
+        if (!tree) return null;
+
+        const collected = this.collectEvents(tree.rootNode, false);
+        const offset = document.offsetAt(position);
+        const baseDir = resolveReadBaseDir(document);
+        if (!baseDir) return null;
+        const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
+        const visited = new Set<string>();
+
+        for (const event of collected.events) {
+            if (event.kind !== 'read' || event.offset <= offset) continue;
+            const target = resolveReadTarget(event.pathText, baseDir);
+            if (!target || visited.has(target)) continue;
+            visited.add(target);
+            const read = this.fileCache.loadFile(target);
+            if (!read) continue;
+            const candidate = this.scanBackwards(
+                read.events,
+                read.lines,
+                new Set([name]),
+                baseDir,
+                visited,
+                target,
+            );
+            if (candidate) {
+                return this.toDefinition({
+                    lines: candidate.lines,
+                    row: candidate.row,
+                    column: candidate.column,
+                    filePath: candidate.filePath || currentFilePath,
+                    headerText: candidate.headerText,
+                    name: candidate.name,
+                    symbolKind: candidate.symbolKind,
+                });
+            }
+        }
+        return null;
+    }
+
     /** Resolve all static declaration/installation locations for a GAP symbol. */
     resolveDefinitions(
         document: vscode.TextDocument,
