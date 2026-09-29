@@ -1,6 +1,6 @@
 /* gap-dark.css: GAP's doc/ref/dark.css restyled for the VS Code look.
-   Body text follows the markdown preview colors and settings.
-   Backgrounds use hard-coded VS Code dark palette colors. */
+   Colors use the VS Code dark palette.
+   Fonts and spacing follow GAP's manual.css, no overrides here. */
 /* dark.css                                             Frank Luebeck */
 /* Initial dark theme contributed by kiryph in issue #75.            */
 /* Derived from GAP doc/ref/dark.css. */
@@ -9,12 +9,6 @@
 body {
   background: #1e1e1e;
   color: var(--vscode-editor-foreground);
-  font-size: var(--markdown-font-size, 14px);
-  line-height: 1.6;
-}
-
-p {
-  margin-bottom: 0.75em;
 }
 
 a:link {
@@ -45,9 +39,6 @@ tt, code {
 /* layout for the definitions of functions, variables, ... */
 div.func {
   background: #2d2d30;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  padding: 4px 8px;
 }
 
 /* Example elements (for old converted manuals, now in div+pre */
