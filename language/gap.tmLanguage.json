@@ -58,7 +58,7 @@
       "match": "\\b(function|local|end|if|then|elif|else|fi|for|while|do|od|repeat|until|return|break|continue|atomic|rec|readonly|readwrite|quit|QUIT)\\b"
     },
     {
-      "name": "keyword.operator.gap",
+      "name": "keyword.operator.expression.gap",
       "match": "\\b(and|in|mod|not|or)\\b"
     },
     {
@@ -66,7 +66,7 @@
       "match": "\\b(true|false|fail)\\b"
     },
     {
-      "name": "keyword.operator.gap",
+      "name": "keyword.operator.expression.gap",
       "match": "->|:=|<=|>=|<>|\\.\\.\\.|\\.\\.|\\+|-|\\*|/|\\^|<|>|="
     },
     {

@@ -9,6 +9,7 @@
 7. Cache Hover help lookups and documentation summaries
 8. Show concise Hover descriptions for assignment, function, comparison, arithmetic, power, range, and variadic operators
 9. Add Hover information for the `;` statement terminator and syntax-highlight all GAP code shown inside Hover
+10. Use a theme-visible TextMate scope for operators rendered inside Hover
 
 ## 0.3.5
 

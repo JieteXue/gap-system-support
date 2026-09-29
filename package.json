@@ -93,7 +93,7 @@
             "comment.line.number-sign.gap"
           ],
           "operator": [
-            "keyword.operator.gap"
+            "keyword.operator.expression.gap"
           ],
           "variable.readonly": [
             "variable.other.constant.gap"

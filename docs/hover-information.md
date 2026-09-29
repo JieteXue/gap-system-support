@@ -58,7 +58,9 @@ operators, punctuation, and fallback examples, is rendered as syntax-highlighted
 GAP code. Hover code blocks use the GAP TextMate grammar because VS Code does
 not apply document semantic tokens inside Markdown Hover content. The grammar
 therefore includes fallback scopes for function calls, record fields,
-parameters used by arrow functions, and ordinary variables.
+parameters used by arrow functions, and ordinary variables. Operators use the
+theme-visible `keyword.operator.expression` scope so default VS Code themes do
+not render them with the same color as plain text.
 
 These descriptions are intentionally short and are not a replacement for the
 GAP language reference.

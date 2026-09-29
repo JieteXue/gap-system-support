@@ -171,6 +171,20 @@ async function main() {
 
     const provider = new GAPHoverProvider(QUERY_PATH);
 
+    section('0. Hover syntax grammar');
+    {
+        const grammar = JSON.parse(
+            fs.readFileSync(path.join(ROOT, 'language', 'gap.tmLanguage.json'), 'utf8'),
+        );
+        const operatorPatterns = grammar.patterns.filter(
+            pattern => pattern.name === 'keyword.operator.expression.gap',
+        );
+        check('symbolic operators use a theme-visible scope', true,
+            operatorPatterns.some(pattern => new RegExp(pattern.match).test(':=')));
+        check('word operators use a theme-visible scope', true,
+            operatorPatterns.some(pattern => new RegExp(pattern.match).test('not')));
+    }
+
     section('1. Node classification and static symbol types');
     {
         const code = [
