@@ -22,7 +22,6 @@ run('npm run compile');
 
 // 2. Generate the query txt files.
 run(`node test/lib/highlight/query.js ${gapFiles.map(f => path.join(hl, f)).join(' ')}`);
-run('node test/lib/highlight/qualified-functions.test.js');
 
 // 3. Compare each json with its txt.
 let allPass = true;

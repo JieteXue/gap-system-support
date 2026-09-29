@@ -8,8 +8,7 @@
 6. Resolve guarded symbols across cross-file and dynamic `Read(...)` loaders
 7. Cache Hover help lookups and documentation summaries
 8. Show concise Hover descriptions for assignment, function, comparison, arithmetic, power, range, and variadic operators
-9. Add Hover information for the `;` statement terminator and syntax-highlight language tokens inside Hover
-10. Highlight qualified and record-entry function fields as functions in definitions and calls
+9. Add Hover information for the `;` statement terminator and syntax-highlight all GAP code shown inside Hover
 
 ## 0.3.5
 

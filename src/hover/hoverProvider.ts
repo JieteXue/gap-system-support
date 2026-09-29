@@ -16,14 +16,12 @@ import { HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES } from '../limits';
 import type { SyntaxNode } from 'web-tree-sitter';
 import * as fs from 'fs';
 
-/** English hover texts. */
-const FALLBACK_TEXT =
-    'No function information found. Please check the function name.\n\n---\n\n' +
-    'User defined functions support the following forms:\n\n' +
-    '- name := function(...)\n' +
-    '- name := atomic function(...)\n' +
-    '- name := x -> ...\n' +
-    '- name := {x, y, ...} -> ...';
+const FALLBACK_FORMS = [
+    'name := function(...)',
+    'name := atomic function(...)',
+    'name := x -> ...',
+    'name := {x, y, ...} -> ...',
+];
 
 const KEYWORD_DESCRIPTIONS: Readonly<Record<string, { type: string; description: string }>> = {
     if: { type: 'conditional keyword', description: 'Starts a conditional block.' },
@@ -188,6 +186,17 @@ function punctuationMarkdown(punctuation: string): vscode.MarkdownString {
     return md;
 }
 
+function fallbackMarkdown(): vscode.MarkdownString {
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown('No function information found. Please check the function name.\n\n');
+    md.appendMarkdown('---\n\nUser defined functions support the following forms:\n\n');
+    for (const form of FALLBACK_FORMS) {
+        md.appendCodeblock(form, 'gap');
+        md.appendMarkdown('\n');
+    }
+    return md;
+}
+
 /**
  * Render the hover for a GAP function.
  * Shows the function title and a link into GAP Help.
@@ -295,7 +304,8 @@ function systemMarkdown(name: string, help?: BuiltinHelp): vscode.MarkdownString
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: ['gap.searchHelpTerm'] };
     md.appendMarkdown('**built-in function**\n\n');
-    md.appendMarkdown(`\`${help?.display || `${name}(...)`}\`\n\n`);
+    md.appendCodeblock(help?.display || `${name}(...)`, 'gap');
+    md.appendMarkdown('\n\n');
     if (help?.description) md.appendMarkdown(`${help.description}\n\n`);
     md.appendMarkdown(help
         ? `Defined in the ${help.book} help book. `
@@ -450,7 +460,7 @@ export class GAPHoverProvider implements vscode.HoverProvider {
 
         // Preserve the old fallback only for call-like function names.
         if (functionNameNodeAt(tree.rootNode, offset)?.id === node.id || isCallCallee(node)) {
-            return new vscode.Hover(new vscode.MarkdownString(FALLBACK_TEXT), this.rangeOf(document, node));
+            return new vscode.Hover(fallbackMarkdown(), this.rangeOf(document, node));
         }
         return undefined;
     }

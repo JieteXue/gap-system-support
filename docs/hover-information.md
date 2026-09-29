@@ -52,9 +52,13 @@ Symbolic operators are covered as well:
 - arithmetic and power: `+`, `-`, `*`, `/`, `^`;
 - ranges and variadic parameters: `..`, `...`.
 
-The `;` statement terminator also has a short Hover description. Keywords,
-constants, operators, and punctuation are rendered as syntax-highlighted GAP
-code inside the Hover.
+The `;` statement terminator also has a short Hover description. All code shown
+inside Hover, including definitions, built-in signatures, keywords, constants,
+operators, punctuation, and fallback examples, is rendered as syntax-highlighted
+GAP code. Hover code blocks use the GAP TextMate grammar because VS Code does
+not apply document semantic tokens inside Markdown Hover content. The grammar
+therefore includes fallback scopes for function calls, record fields,
+parameters used by arrow functions, and ordinary variables.
 
 These descriptions are intentionally short and are not a replacement for the
 GAP language reference.

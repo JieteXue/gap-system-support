@@ -266,6 +266,8 @@ async function main() {
         const t = textOf(await hoverAt(provider, doc, 'lonelyfn('));
         check('unknown function gets the fallback hover', true,
             t !== undefined && t.includes('No function information'));
+        check('fallback function forms are rendered as highlighted GAP code', true,
+            t.includes('```gap\nname := function(...)\n```'));
     }
 
     section('4. Comment rules');
@@ -603,6 +605,8 @@ async function main() {
         const hover = await hoverAt(provider, doc, 'Size(');
         check('GAP function shows the title', true,
             textOf(hover).includes('**built-in function**'));
+        check('GAP function signature is rendered as highlighted GAP code', true,
+            textOf(hover).includes('```gap\n'));
         check('GAP function shows the help link text', true,
             textOf(hover).includes('See more information in'));
         check('link targets the hovered name', 'Size', linkTerm(hover.contents));

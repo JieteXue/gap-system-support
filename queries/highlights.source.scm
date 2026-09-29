@@ -19,6 +19,15 @@
   left: (identifier) @function
   right: (lambda))
 
+; @gap-query viewport-only begin
+(call
+  function: (identifier) @function.call)
+
+; @gap-query viewport-only end
+((call
+  function: (identifier) @function.builtin)
+  (#any-of? @function.builtin "Assert" "Info" "IsBound" "Unbind" "TryNextMethod"))
+
 (parameters
   (identifier) @variable.parameter)
 
@@ -97,43 +106,6 @@
     (identifier)
     (integer)
   ] @variable.member)
-
-; Function-valued record fields override the generic member highlighting.
-(record_entry
-  left: (identifier) @function
-  right: [
-    (function)
-    (atomic_function)
-    (lambda)
-  ])
-
-(assignment_statement
-  left: [
-    (record_selector
-      selector: (identifier) @function)
-    (component_selector
-      selector: (identifier) @function)
-  ]
-  right: [
-    (function)
-    (atomic_function)
-    (lambda)
-  ])
-
-; @gap-query viewport-only begin
-(call
-  function: [
-    (identifier) @function.call
-    (record_selector
-      selector: (identifier) @function.call)
-    (component_selector
-      selector: (identifier) @function.call)
-  ])
-
-; @gap-query viewport-only end
-((call
-  function: (identifier) @function.builtin)
-  (#any-of? @function.builtin "Assert" "Info" "IsBound" "Unbind" "TryNextMethod"))
 
 (function_call_option
   [
