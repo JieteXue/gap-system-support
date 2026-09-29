@@ -400,6 +400,27 @@ export class GAPDefinitionResolver {
             }
         }
 
+        // Record fields are definitions too. They are intentionally collected
+        // from the AST because completion.scm only models lexical variables.
+        const collectRecordFields = (node: SyntaxNode): void => {
+            if (node.type === 'record_entry') {
+                const left = node.childForFieldName('left');
+                if (left?.type === 'identifier' && !hasErrorAncestor(left)) {
+                    const key = `${left.startIndex}:${left.endIndex}`;
+                    const existing = defNodes.get(key);
+                    if (!existing || kindPriority.variable > kindPriority[existing.symbolKind]) {
+                        defNodes.set(key, {
+                            node: left,
+                            keep: !topLevelOnly || isTopLevel(left),
+                            symbolKind: 'variable',
+                        });
+                    }
+                }
+            }
+            for (const child of node.namedChildren) collectRecordFields(child);
+        };
+        collectRecordFields(rootNode);
+
         // Attach every definition to its innermost enclosing scope, as scoped.ts does.
         for (const { node, keep, symbolKind } of defNodes.values()) {
             if (!keep) continue;

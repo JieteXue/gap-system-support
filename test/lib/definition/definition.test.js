@@ -399,8 +399,24 @@ async function main() {
             defineAt(provider, doc, 'localValue;', 1).range.start.line);
         check('for-loop variable reference resolves', 5,
             defineAt(provider, doc, 'item;', 0).range.start.line);
-        check('record selector does not resolve as a variable', true,
-            defineAt(provider, doc, 'field;', 0) === undefined);
+        check('record selector resolves to its record field', 10,
+            defineAt(provider, doc, 'field;', 0).range.start.line);
+
+        const nestedRecordCode = [
+            'MagneticEquivalence := rec(',
+            '    Matrix := rec(',
+            '        Block := function(x)',
+            '            return x;',
+            '        end',
+            '    )',
+            ');',
+            'MagneticEquivalence.Matrix.Block(1);',
+        ].join('\n');
+        const nestedRecordDoc = makeDocument('nested-record.g', nestedRecordCode, null);
+        check('nested record selector resolves the outer field', 1,
+            defineAt(provider, nestedRecordDoc, 'Matrix.', 0).range.start.line);
+        check('nested record selector resolves the inner field', 2,
+            defineAt(provider, nestedRecordDoc, 'Block(', 0).range.start.line);
 
         const shadowCode = [
             'value := 1;',

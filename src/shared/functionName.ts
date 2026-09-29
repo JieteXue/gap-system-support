@@ -82,19 +82,6 @@ function identifierNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
     return node?.type === 'identifier' ? node : null;
 }
 
-/** Record field names are properties, not variable references. */
-function isRecordField(node: SyntaxNode): boolean {
-    const parent = node.parent;
-    if (!parent) return false;
-    if (parent.type === 'record_selector') {
-        return parent.childForFieldName('selector')?.id === node.id;
-    }
-    if (parent.type === 'record_entry') {
-        return parent.childForFieldName('left')?.id === node.id;
-    }
-    return false;
-}
-
 /** Return a declaration string name under the cursor. */
 function declarationStringNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
     let node = root.descendantForIndex(Math.max(0, Math.min(offset, root.endIndex - 1)));
@@ -125,6 +112,6 @@ function declarationStringNodeAt(root: SyntaxNode, offset: number): SyntaxNode |
 /** Return any resolvable GAP symbol name under the cursor. */
 export function symbolNameNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
     const identifier = identifierNodeAt(root, offset);
-    if (identifier && !isRecordField(identifier)) return identifier;
+    if (identifier) return identifier;
     return declarationStringNodeAt(root, offset);
 }
