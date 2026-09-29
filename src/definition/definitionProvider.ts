@@ -4,12 +4,16 @@ import * as vscode from 'vscode';
 import { isParserReady, getDocumentTree } from '../parser/gapParser';
 import { GAPDefinitionResolver } from '../hover/definitionResolver';
 import { symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
+import type { GAPReferenceProvider } from '../references/referenceProvider';
 
 export class GAPDefinitionProvider implements vscode.DefinitionProvider {
 
     private resolver: GAPDefinitionResolver;
 
-    constructor(completionPath: string) {
+    constructor(
+        completionPath: string,
+        private readonly referenceProvider?: GAPReferenceProvider,
+    ) {
         this.resolver = new GAPDefinitionResolver(completionPath);
     }
 
@@ -21,7 +25,7 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         document: vscode.TextDocument,
         position: vscode.Position,
         token: vscode.CancellationToken,
-    ): vscode.Definition | vscode.DefinitionLink[] | undefined {
+    ): vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]> {
         if (!isParserReady()) return undefined;
 
         // Only function and GAP symbol names qualify.
@@ -50,6 +54,14 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
                 position.character <= item.column + node.text.length;
         });
         if (selfDefinition) {
+            if (this.referenceProvider) {
+                return this.referenceProvider.provideReferences(
+                    document,
+                    position,
+                    { includeDeclaration: true },
+                    token,
+                ).then(locations => locations.length > 0 ? locations : undefined);
+            }
             const uri = selfDefinition.filePath === ''
                 ? document.uri
                 : vscode.Uri.file(selfDefinition.filePath);

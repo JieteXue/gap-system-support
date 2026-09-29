@@ -36,6 +36,7 @@ installMock();
 
 const { initGapParser } = require('../../../out/parser/gapParser');
 const { GAPDefinitionProvider } = require('../../../out/definition/definitionProvider');
+const { GAPReferenceProvider } = require('../../../out/references/referenceProvider');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const QUERY_PATH = path.join(ROOT, 'queries', 'completion.scm');
@@ -196,6 +197,25 @@ async function main() {
             `${loc.targetSelectionRange.start.character}:${loc.targetSelectionRange.end.character}`);
         check('call site still returns a plain Location', true,
             defineAt(provider, doc, 'ownfn();').targetRange === undefined);
+
+        const referenceProvider = new GAPReferenceProvider(QUERY_PATH);
+        const clickableProvider = new GAPDefinitionProvider(QUERY_PATH, referenceProvider);
+        const clickableCode = [
+            'target := function()',
+            'end;',
+            'target();',
+            'target();',
+        ].join('\n');
+        const clickableDocument = makeDocument('clickable.g', clickableCode, null);
+        const clickTargets = await clickableProvider.provideDefinition(
+            clickableDocument,
+            positionOf(clickableCode, 'target :='),
+            new CancellationTokenStub(),
+        );
+        check('definition click returns references for the Peek widget', [2, 3],
+            clickTargets.map(location => location.range.start.line));
+        check('definition click omits the clicked definition', false,
+            clickTargets.some(location => location.range.start.line === 0));
     }
 
     section('7. Cursor at the end of the name (right-click positions)');

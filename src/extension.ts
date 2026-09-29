@@ -282,15 +282,6 @@ export async function activate(context: vscode.ExtensionContext) {
         ),
     );
 
-    // Register the definition provider for Go to Definition and Peek Definition.
-    const definitionProvider = new GAPDefinitionProvider(completionPath);
-    context.subscriptions.push(
-        vscode.languages.registerDefinitionProvider(
-            { language: 'gap' },
-            definitionProvider,
-        ),
-    );
-
     // Register references so VS Code can show Find All References and the
     // inline Peek References editor.
     const referenceProvider = new GAPReferenceProvider(completionPath);
@@ -298,6 +289,19 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerReferenceProvider(
             { language: 'gap' },
             referenceProvider,
+        ),
+    );
+
+    // A definition click delegates to the reference provider. Combined with
+    // editor.definitionLinkOpensInPeek, command-click opens Peek References.
+    const definitionProvider = new GAPDefinitionProvider(
+        completionPath,
+        referenceProvider,
+    );
+    context.subscriptions.push(
+        vscode.languages.registerDefinitionProvider(
+            { language: 'gap' },
+            definitionProvider,
         ),
     );
 
