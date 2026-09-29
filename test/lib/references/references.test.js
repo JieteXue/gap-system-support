@@ -13,6 +13,7 @@ const { check, section, summary } = require('../help/helpers');
 const workspaceState = {
     folderPath: null,
     documents: [],
+    findFilesCalls: 0,
 };
 
 vscodeMock.workspace = {
@@ -22,7 +23,10 @@ vscodeMock.workspace = {
             ? { uri: vscodeMock.Uri.file(workspaceState.folderPath) }
             : undefined
     ),
-    findFiles: async () => workspaceState.documents.map(document => document.uri),
+    findFiles: async () => {
+        workspaceState.findFilesCalls++;
+        return workspaceState.documents.map(document => document.uri);
+    },
     openTextDocument: async uri => {
         const document = workspaceState.documents.find(item => item.uri.fsPath === uri.fsPath);
         if (!document) throw new Error(`Document not found: ${uri.fsPath}`);
@@ -122,8 +126,10 @@ async function main() {
             'a := myfn(1);',
             'b := myfn(2);',
         ].join('\n');
-        const document = makeDocument('same-file.g', code);
+        workspaceState.folderPath = os.tmpdir();
+        const document = makeDocument('same-file.g', code, os.tmpdir());
         workspaceState.documents = [document];
+        workspaceState.findFilesCalls = 0;
 
         check('definition omits itself and returns both usages', [3, 4],
             linesOf(await referencesAt(provider, document, 'myfn :=')));
@@ -131,6 +137,11 @@ async function main() {
             linesOf(await referencesAt(provider, document, 'myfn(1)')));
         check('declarations can be excluded', [4],
             linesOf(await referencesAt(provider, document, 'myfn(1)', 0, false)));
+        check('workspace file discovery is reused', 1, workspaceState.findFilesCalls);
+        check('symbol index is reused on repeated requests', [3, 4],
+            linesOf(await referencesAt(provider, document, 'myfn :=')));
+        check('repeated request does not rediscover files', 1, workspaceState.findFilesCalls);
+        workspaceState.folderPath = null;
     }
 
     section('2. Lexical shadowing');

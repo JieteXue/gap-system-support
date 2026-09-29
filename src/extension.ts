@@ -342,6 +342,11 @@ export async function activate(context: vscode.ExtensionContext) {
             diagnosticsProvider.onDocumentClosed(doc.uri);
         }),
     );
+    context.subscriptions.push(
+        vscode.workspace.onDidCreateFiles(() => referenceProvider.onWorkspaceFilesChanged()),
+        vscode.workspace.onDidDeleteFiles(() => referenceProvider.onWorkspaceFilesChanged()),
+        vscode.workspace.onDidRenameFiles(() => referenceProvider.onWorkspaceFilesChanged()),
+    );
 
     // Register the completion data commands.
     context.subscriptions.push(

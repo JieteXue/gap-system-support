@@ -10,6 +10,12 @@ import { READ_CONTENT_LIMIT } from '../limits';
 
 const SOURCE_GLOB = '**/*.{g,gd,gi,gap}';
 const EXCLUDE_GLOB = '**/{.git,node_modules,out}/**';
+const WORKSPACE_URI_CACHE_MS = 5000;
+
+interface SymbolIndex {
+    version: number;
+    symbols: Map<string, SyntaxNode[]>;
+}
 
 function definitionKey(definition: ResolvedDefinition): string {
     return `${definition.filePath}:${definition.row}:${definition.column}`;
@@ -58,6 +64,9 @@ function collectSymbolNodes(root: SyntaxNode, lookupName: string): SyntaxNode[] 
 export class GAPReferenceProvider implements vscode.ReferenceProvider {
 
     private readonly resolver: GAPDefinitionResolver;
+    private readonly symbolIndexCache = new Map<string, SymbolIndex>();
+    private readonly documentCache = new Map<string, vscode.TextDocument>();
+    private readonly workspaceUriCache = new Map<string, { expiresAt: number; uris: vscode.Uri[] }>();
 
     constructor(completionPath: string) {
         this.resolver = new GAPDefinitionResolver(completionPath);
@@ -65,6 +74,13 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.resolver.onDocumentClosed(uri);
+        const key = uri.toString();
+        this.symbolIndexCache.delete(key);
+        this.documentCache.delete(key);
+    }
+
+    onWorkspaceFilesChanged(): void {
+        this.workspaceUriCache.clear();
     }
 
     async provideReferences(
@@ -126,8 +142,8 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
             if (token.isCancellationRequested) return [];
             const text = candidateDocument.getText();
             if (text.length > READ_CONTENT_LIMIT) continue;
-            const candidateTree = getDocumentTree(candidateDocument, text);
-            for (const candidate of collectSymbolNodes(candidateTree.rootNode, lookupName)) {
+            const candidates = this.symbolsFor(candidateDocument, text, lookupName);
+            for (const candidate of candidates) {
                 if (token.isCancellationRequested) return [];
                 const filePath = candidateDocument.isUntitled ? '' : candidateDocument.uri.fsPath;
                 const key = locationKey(
@@ -181,6 +197,36 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
             left.range.start.character - right.range.start.character);
     }
 
+    private symbolsFor(
+        document: vscode.TextDocument,
+        text: string,
+        lookupName: string,
+    ): SyntaxNode[] {
+        const key = document.uri.toString();
+        const cached = this.symbolIndexCache.get(key);
+        if (cached?.version === document.version) {
+            return cached.symbols.get(lookupName) ?? [];
+        }
+
+        const tree = getDocumentTree(document, text);
+        const symbols = new Map<string, SyntaxNode[]>();
+        const visit = (node: SyntaxNode): void => {
+            if (node.type === 'identifier' || node.type === 'string_content') {
+                const classified = symbolNameNodeAt(tree.rootNode, node.startIndex);
+                if (classified?.id === node.id) {
+                    const name = symbolLookupName(node);
+                    const entries = symbols.get(name);
+                    if (entries) entries.push(node);
+                    else symbols.set(name, [node]);
+                }
+            }
+            for (const child of node.namedChildren) visit(child);
+        };
+        visit(tree.rootNode);
+        this.symbolIndexCache.set(key, { version: document.version, symbols });
+        return symbols.get(lookupName) ?? [];
+    }
+
     private async workspaceDocuments(
         current: vscode.TextDocument,
         token: vscode.CancellationToken,
@@ -189,7 +235,18 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
             return [current];
         }
 
-        const uris = await vscode.workspace.findFiles(SOURCE_GLOB, EXCLUDE_GLOB);
+        const workspace = vscode.workspace.getWorkspaceFolder(current.uri);
+        if (!workspace) return [current];
+        const workspaceKey = workspace.uri.toString();
+        const now = Date.now();
+        let cachedUris = this.workspaceUriCache.get(workspaceKey);
+        if (!cachedUris || cachedUris.expiresAt <= now) {
+            cachedUris = {
+                expiresAt: now + WORKSPACE_URI_CACHE_MS,
+                uris: await vscode.workspace.findFiles(SOURCE_GLOB, EXCLUDE_GLOB),
+            };
+            this.workspaceUriCache.set(workspaceKey, cachedUris);
+        }
         const documents: vscode.TextDocument[] = [];
         const seen = new Set<string>();
         const add = (document: vscode.TextDocument): void => {
@@ -200,11 +257,18 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         };
         add(current);
 
-        for (const uri of uris) {
+        for (const uri of cachedUris.uris) {
             if (token.isCancellationRequested) break;
             if (seen.has(uri.toString())) continue;
             try {
-                add(await vscode.workspace.openTextDocument(uri));
+                const key = uri.toString();
+                const cachedDocument = this.documentCache.get(key);
+                if (cachedDocument) add(cachedDocument);
+                else {
+                    const opened = await vscode.workspace.openTextDocument(uri);
+                    this.documentCache.set(key, opened);
+                    add(opened);
+                }
             } catch {
                 // Files that disappear during a workspace search are skipped.
             }
