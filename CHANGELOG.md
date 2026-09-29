@@ -1,3 +1,10 @@
+## Unreleased
+
+1. Expand Go to Definition across lexical symbols, qualified record/component paths, GAP declarations, bindings, installations, and multiple method implementations
+2. Add workspace Find All References and native Peek behavior with lexical scope, complete qualified-name matching, selected-occurrence exclusion, and direct navigation for definitions without references
+3. Add static Hover categories, built-in help summaries, language keyword/operator/punctuation descriptions, cross-file guarded lookup, and syntax-highlighted GAP snippets
+4. Cache parsed files, workspace symbol/reference indexes, help lookups, and documentation summaries to keep repeated editor requests responsive
+
 ## 0.3.5
 
 1. Add GAP syntax checking tool and integrate with diagnostics

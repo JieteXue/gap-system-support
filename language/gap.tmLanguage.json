@@ -43,14 +43,22 @@
     },
     {
       "name": "entity.name.function.gap",
-      "match": "(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*(?=\\s*:=\\s*(?:atomic\\s+function\\b|function\\b|\\{[^{}]*\\}\\s*->|[A-Za-z_][A-Za-z0-9_]*\\s*->))"
+      "match": "(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*(?=\\s*:=\\s*(?:atomic\\s+function\\b|function\\b|\\{[^{}]*\\}\\s*->|[A-Za-z_][A-Za-z0-9_]*\\s*->))"
+    },
+    {
+      "name": "entity.name.function.gap",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    {
+      "name": "variable.parameter.gap",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*->)"
     },
     {
       "name": "keyword.control.gap",
       "match": "\\b(function|local|end|if|then|elif|else|fi|for|while|do|od|repeat|until|return|break|continue|atomic|rec|readonly|readwrite|quit|QUIT)\\b"
     },
     {
-      "name": "keyword.operator.gap",
+      "name": "keyword.operator.expression.gap",
       "match": "\\b(and|in|mod|not|or)\\b"
     },
     {
@@ -58,7 +66,7 @@
       "match": "\\b(true|false|fail)\\b"
     },
     {
-      "name": "keyword.operator.gap",
+      "name": "keyword.operator.expression.gap",
       "match": "->|:=|<=|>=|<>|\\.\\.\\.|\\.\\.|\\+|-|\\*|/|\\^|<|>|="
     },
     {
@@ -68,6 +76,14 @@
     {
       "name": "punctuation.bracket.gap",
       "match": "[()\\[\\]{}]"
+    },
+    {
+      "name": "variable.other.member.gap",
+      "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*"
+    },
+    {
+      "name": "variable.other.gap",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
     }
   ],
   "repository": {

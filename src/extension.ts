@@ -12,6 +12,7 @@ import { ensureData, generateData, resetData } from './completion/dataManager';
 import { GAPCompletionProvider } from './completion/completionProvider';
 import { GAPHoverProvider } from './hover/hoverProvider';
 import { GAPDefinitionProvider } from './definition/definitionProvider';
+import { GAPReferenceProvider } from './references/referenceProvider';
 import { toShellPath, resolveHelpPath } from './path';
 import { searchHelp } from './help/searchEngine';
 import { showLiveSearchPicker } from './help/searchPicker';
@@ -281,8 +282,22 @@ export async function activate(context: vscode.ExtensionContext) {
         ),
     );
 
-    // Register the definition provider for Go to Definition and Peek Definition.
-    const definitionProvider = new GAPDefinitionProvider(completionPath);
+    // Register references so VS Code can show Find All References and the
+    // inline Peek References editor.
+    const referenceProvider = new GAPReferenceProvider(completionPath);
+    context.subscriptions.push(
+        vscode.languages.registerReferenceProvider(
+            { language: 'gap' },
+            referenceProvider,
+        ),
+    );
+
+    // A definition click delegates to the reference provider. Combined with
+    // editor.definitionLinkOpensInPeek, command-click opens Peek References.
+    const definitionProvider = new GAPDefinitionProvider(
+        completionPath,
+        referenceProvider,
+    );
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(
             { language: 'gap' },
@@ -306,6 +321,28 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(doc => diagnosticsProvider.checkNow(doc)),
     );
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+        vscode.workspace.onDidCreateFiles(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+        vscode.workspace.onDidDeleteFiles(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+        vscode.workspace.onDidRenameFiles(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+    );
     // Enable/disable diagnostics when the gap.diagnostics setting changes.
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(e => {
@@ -323,10 +360,10 @@ export async function activate(context: vscode.ExtensionContext) {
             completionProvider.onDocumentClosed(doc.uri);
             hoverProvider.onDocumentClosed(doc.uri);
             definitionProvider.onDocumentClosed(doc.uri);
+            referenceProvider.onDocumentClosed(doc.uri);
             diagnosticsProvider.onDocumentClosed(doc.uri);
         }),
     );
-
     // Register the completion data commands.
     context.subscriptions.push(
         vscode.commands.registerCommand('gap.generateCompletionData', () => generateData(context)),

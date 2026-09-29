@@ -3,13 +3,17 @@
 import * as vscode from 'vscode';
 import { isParserReady, getDocumentTree } from '../parser/gapParser';
 import { GAPDefinitionResolver } from '../hover/definitionResolver';
-import { functionNameNodeAt } from '../shared/functionName';
+import { symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
+import type { GAPReferenceProvider } from '../references/referenceProvider';
 
 export class GAPDefinitionProvider implements vscode.DefinitionProvider {
 
     private resolver: GAPDefinitionResolver;
 
-    constructor(completionPath: string) {
+    constructor(
+        completionPath: string,
+        private readonly referenceProvider?: GAPReferenceProvider,
+    ) {
         this.resolver = new GAPDefinitionResolver(completionPath);
     }
 
@@ -17,60 +21,99 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         this.resolver.onDocumentClosed(uri);
     }
 
+    onWorkspaceFilesChanged(): void {
+        this.resolver.onWorkspaceFilesChanged();
+    }
+
     provideDefinition(
         document: vscode.TextDocument,
         position: vscode.Position,
         token: vscode.CancellationToken,
-    ): vscode.Location | vscode.LocationLink[] | undefined {
+    ): vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]> {
         if (!isParserReady()) return undefined;
 
-        // Only callees and function definition LHS names qualify.
+        // Only function and GAP symbol names qualify.
         const offset = document.offsetAt(position);
         if (token.isCancellationRequested) return undefined;
         const tree = getDocumentTree(document);
-        const node = functionNameNodeAt(tree.rootNode, offset);
+        const node = symbolNameNodeAt(tree.rootNode, offset);
         if (!node) return undefined;
 
-        const resolved = this.resolver.resolveDefinition(document, position, node.text);
-        if (!resolved) return undefined;
-
-        // Same-document hits reuse the document URI.
-        // Read chain files use the disk path.
-        const sameDocument =
-            resolved.filePath !== '' &&
-            (process.platform === 'win32'
-                ? resolved.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
-                : resolved.filePath === document.uri.fsPath);
-        const uri = sameDocument || resolved.filePath === '' ? document.uri : vscode.Uri.file(resolved.filePath);
-
-        const targetRange = new vscode.Range(
-            new vscode.Position(resolved.row, resolved.column),
-            new vscode.Position(resolved.row, resolved.column + node.text.length),
+        const resolved = this.resolver.resolveDefinitions(
+            document,
+            position,
+            symbolLookupName(node),
         );
+        if (resolved.length === 0) return undefined;
 
-        // The cursor can sit on the definition name in the same document.
-        // Return a LocationLink with a zero-width selection range.
-        // The selection range never contains the cursor.
-
-        // Anchor the selection point at the far end of the name.
-        // This happens only when the cursor sits on the first character.
-        if (sameDocument &&
-            position.line === resolved.row &&
-            position.character >= resolved.column &&
-            position.character <= resolved.column + node.text.length) {
-            const zeroCharacter = position.character === resolved.column
-                ? resolved.column + node.text.length
-                : resolved.column;
-            return [{
-                targetUri: uri,
-                targetRange,
-                targetSelectionRange: new vscode.Range(
-                    new vscode.Position(resolved.row, zeroCharacter),
-                    new vscode.Position(resolved.row, zeroCharacter),
-                ),
-            } as vscode.LocationLink];
+        const selfDefinition = resolved.find(item => {
+            const sameDocument =
+                item.filePath === '' ||
+                (process.platform === 'win32'
+                    ? item.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
+                    : item.filePath === document.uri.fsPath);
+            return sameDocument &&
+                position.line === item.row &&
+                position.character >= item.column &&
+                position.character <= item.column + node.text.length;
+        });
+        if (selfDefinition) {
+            const selfLink = this.selfDefinitionLink(
+                document,
+                position,
+                node.text.length,
+                selfDefinition,
+            );
+            if (this.referenceProvider) {
+                return this.referenceProvider.provideReferences(
+                    document,
+                    position,
+                    { includeDeclaration: true },
+                    token,
+                ).then(locations => locations.length > 0 ? locations : [selfLink]);
+            }
+            return [selfLink];
         }
 
-        return new vscode.Location(uri, targetRange);
+        return resolved.map(item => {
+            const sameDocument =
+                item.filePath !== '' &&
+                (process.platform === 'win32'
+                    ? item.filePath.toLowerCase() === document.uri.fsPath.toLowerCase()
+                    : item.filePath === document.uri.fsPath);
+            const uri = sameDocument || item.filePath === '' ? document.uri : vscode.Uri.file(item.filePath);
+            return new vscode.Location(
+                uri,
+                new vscode.Range(
+                    new vscode.Position(item.row, item.column),
+                    new vscode.Position(item.row, item.column + node.text.length),
+                ),
+            );
+        });
+    }
+
+    private selfDefinitionLink(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        nameLength: number,
+        definition: { filePath: string; row: number; column: number },
+    ): vscode.LocationLink {
+        const uri = definition.filePath === ''
+            ? document.uri
+            : vscode.Uri.file(definition.filePath);
+        const zeroCharacter = position.character === definition.column
+            ? definition.column + nameLength
+            : definition.column;
+        return {
+            targetUri: uri,
+            targetRange: new vscode.Range(
+                new vscode.Position(definition.row, definition.column),
+                new vscode.Position(definition.row, definition.column + nameLength),
+            ),
+            targetSelectionRange: new vscode.Range(
+                new vscode.Position(definition.row, zeroCharacter),
+                new vscode.Position(definition.row, zeroCharacter),
+            ),
+        };
     }
 }

@@ -61,10 +61,11 @@ const vscodeMock = {
     Uri: {
         joinPath(base, ...segments) {
             const basePath = typeof base === 'string' ? base : base.fsPath;
-            return { fsPath: path.join(basePath, ...segments) };
+            const fsPath = path.join(basePath, ...segments);
+            return { fsPath, toString: () => `file://${fsPath}` };
         },
         file(fsPath) {
-            return { fsPath };
+            return { fsPath, toString: () => `file://${fsPath}` };
         },
     },
 };
