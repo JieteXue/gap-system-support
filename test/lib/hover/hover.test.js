@@ -131,6 +131,16 @@ function hoverAt(provider, doc, needle, occurrence = 0) {
     );
 }
 
+/** Return the provider hover at an offset inside `needle`. */
+function hoverInside(provider, doc, needle, offset) {
+    const position = positionOf(doc.getText(), needle);
+    return provider.provideHover(
+        doc,
+        { line: position.line, character: position.character + offset },
+        new CancellationTokenStub(),
+    );
+}
+
 /** Return the hover text contents, or undefined. */
 function textOf(hover) {
     return hover && hover.contents ? hover.contents.value : undefined;
@@ -161,7 +171,21 @@ async function main() {
 
     const provider = new GAPHoverProvider(QUERY_PATH);
 
-    section('1. Node classification: only function names trigger a hover');
+    section('0. Hover syntax grammar');
+    {
+        const grammar = JSON.parse(
+            fs.readFileSync(path.join(ROOT, 'language', 'gap.tmLanguage.json'), 'utf8'),
+        );
+        const operatorPatterns = grammar.patterns.filter(
+            pattern => pattern.name === 'keyword.operator.expression.gap',
+        );
+        check('symbolic operators use a theme-visible scope', true,
+            operatorPatterns.some(pattern => new RegExp(pattern.match).test(':=')));
+        check('word operators use a theme-visible scope', true,
+            operatorPatterns.some(pattern => new RegExp(pattern.match).test('not')));
+    }
+
+    section('1. Node classification and static symbol types');
     {
         const code = [
             'myfn := function(x)',
@@ -169,14 +193,82 @@ async function main() {
             'end;',
             'myfn(1);',
             'y := 3;',
+            'typed := function(parameter)',
+            '  return parameter;',
+            'end;',
+            'value := fail;',
             'f2 := { x -> x + 1 };',
         ].join('\n');
         const doc = makeDocument('classify.g', code, null);
         check('definition identifier hovers', true, (await hoverAt(provider, doc, 'myfn :=')) !== undefined);
         check('call identifier hovers', true, (await hoverAt(provider, doc, 'myfn(1)')) !== undefined);
         check('lambda definition hovers', true, (await hoverAt(provider, doc, 'f2 :=')) !== undefined);
-        check('variable assignment does not hover', true, (await hoverAt(provider, doc, 'y :=')) === undefined);
-        check('keyword does not hover', true, (await hoverAt(provider, doc, 'return')) === undefined);
+        check('variable assignment hovers', true, (await hoverAt(provider, doc, 'y :=')).contents.value.includes('**variable**'));
+        check('parameter reference shows parameter type', true,
+            (await hoverAt(provider, doc, 'parameter;')).contents.value.includes('**parameter**'));
+        check('user function shows function type', true,
+            (await hoverAt(provider, doc, 'typed :=')).contents.value.includes('**function**'));
+        check('keyword shows its syntax role', true,
+            textOf(await hoverAt(provider, doc, 'return')).includes('**control keyword**'));
+        const conditional = makeDocument(
+            'conditional.g',
+            'if not IsBound(value) then\n  return value;\nfi;\n',
+            null,
+        );
+        check('if keyword hovers', true, textOf(await hoverAt(provider, conditional, 'if ')).includes('conditional block'));
+        check('not keyword hovers', true, textOf(await hoverAt(provider, conditional, 'not ')).includes('Negates'));
+        check('then keyword hovers', true, textOf(await hoverAt(provider, conditional, 'then')).includes('conditional branch'));
+        check('fi keyword hovers', true, textOf(await hoverAt(provider, conditional, 'fi;')).includes('Ends a conditional'));
+        check('fail literal hovers', true,
+            textOf(await hoverAt(provider, doc, 'fail;')).includes('**built-in constant**'));
+        check('hover token is rendered as highlighted GAP code', true,
+            textOf(await hoverAt(provider, doc, 'fail;')).includes('```gap\nfail\n```'));
+
+        const operatorCode = [
+            'assigned := 1;',
+            'lambda := x -> x;',
+            'equal := assigned = 1;',
+            'different := assigned <> 2;',
+            'less := 1 < 2;',
+            'lessEqual := 1 <= 2;',
+            'greater := 2 > 1;',
+            'greaterEqual := 2 >= 1;',
+            'sum := 1 + 2;',
+            'difference := 2 - 1;',
+            'product := 2 * 3;',
+            'quotient := 6 / 2;',
+            'power := 2 ^ 3;',
+            'range := [1 .. 3];',
+            'variadic := function(head, tail...)',
+            '  return tail;',
+            'end;',
+        ].join('\n');
+        const operatorDoc = makeDocument('operators.g', operatorCode, null);
+        const operatorCases = [
+            [':=', 'assignment operator', 0],
+            ['->', 'function operator', 0],
+            [' = ', 'comparison operator', 1],
+            ['<>', 'comparison operator', 0],
+            [' < ', 'comparison operator', 1],
+            ['<=', 'comparison operator', 0],
+            [' > ', 'comparison operator', 1],
+            ['>=', 'comparison operator', 0],
+            [' + ', 'arithmetic operator', 1],
+            [' - ', 'arithmetic operator', 1],
+            [' * ', 'arithmetic operator', 1],
+            [' / ', 'arithmetic operator', 1],
+            [' ^ ', 'power operator', 1],
+            ['..', 'range operator', 0],
+            ['...', 'variadic marker', 0],
+        ];
+        for (const [operator, type, offset] of operatorCases) {
+            check(`${operator.trim()} operator hovers`, true,
+                textOf(await hoverInside(provider, operatorDoc, operator, offset)).includes(`**${type}**`));
+        }
+        check('semicolon hovers', true,
+            textOf(await hoverAt(provider, operatorDoc, ';')).includes('**statement terminator**'));
+        check('semicolon is rendered as highlighted GAP code', true,
+            textOf(await hoverAt(provider, operatorDoc, ';')).includes('```gap\n;\n```'));
         // A position right after the name still hovers.
         check('definition name at word end still hovers', true, provider.provideHover(doc, { line: 0, character: 4 }, new CancellationTokenStub()) !== undefined);
     }
@@ -188,6 +280,8 @@ async function main() {
         const t = textOf(await hoverAt(provider, doc, 'lonelyfn('));
         check('unknown function gets the fallback hover', true,
             t !== undefined && t.includes('No function information'));
+        check('fallback function forms are rendered as highlighted GAP code', true,
+            t.includes('```gap\nname := function(...)\n```'));
     }
 
     section('4. Comment rules');
@@ -445,6 +539,62 @@ async function main() {
         const doc9 = makeDocument('main9.g', code9, tmp);
         check('open document content used for Read files', true,
             textOf(await hoverAt(provider, doc9, 'openfn(')).includes('open doc'));
+
+        fs.writeFileSync(path.join(tmp, 'future.g'), 'if not IsBound(FutureValue) then\n  Read("future-def.g");\nfi;\n');
+        fs.writeFileSync(path.join(tmp, 'future-def.g'), 'FutureValue := rec();\n');
+        const futureDoc = makeDocument('future.g', fs.readFileSync(path.join(tmp, 'future.g'), 'utf8'), tmp);
+        const futureHover = await hoverAt(provider, futureDoc, 'FutureValue');
+        check('IsBound guard resolves a future Read definition', true,
+            textOf(futureHover).includes('**variable**'));
+
+        fs.writeFileSync(path.join(tmp, 'dynamic-loader.g'), [
+            'if not IsBound(CrossFileValue) then',
+            '  Read(Concatenation(directory, "dynamic-def.g"));',
+            'fi;',
+        ].join('\n'));
+        fs.writeFileSync(path.join(tmp, 'dynamic-def.g'), 'CrossFileValue := rec();\n');
+        const dynamicDoc = makeDocument(
+            'dynamic-loader.g',
+            fs.readFileSync(path.join(tmp, 'dynamic-loader.g'), 'utf8'),
+            tmp,
+        );
+        const dynamicHover = await hoverAt(provider, dynamicDoc, 'CrossFileValue');
+        check('IsBound guard finds a cross-file definition for a dynamic Read', true,
+            textOf(dynamicHover).includes('**variable**'));
+
+        fs.writeFileSync(path.join(tmp, 'qualified-def.g'), [
+            'MAGNETIC_INTERNAL := rec();',
+            'MAGNETIC_INTERNAL.IsIntegralSquareMatrix := function(value)',
+            '  return true;',
+            'end;',
+        ].join('\n'));
+        const qualifiedCode = [
+            'if not MAGNETIC_INTERNAL.IsIntegralSquareMatrix(value) then',
+            'fi;',
+        ].join('\n');
+        const qualifiedDoc = makeDocument('qualified-use.g', qualifiedCode, tmp);
+        check('qualified call hovers from the left identifier', true,
+            textOf(await hoverAt(provider, qualifiedDoc, 'MAGNETIC_INTERNAL')).includes('**function**'));
+        check('qualified call hovers from the selector identifier', true,
+            textOf(await hoverAt(provider, qualifiedDoc, 'IsIntegralSquareMatrix')).includes('**function**'));
+        check('qualified call hovers from the dot', true,
+            textOf(await hoverAt(provider, qualifiedDoc, '.IsIntegralSquareMatrix')).includes('**function**'));
+
+        const qualifiedDefinitionCode = [
+            'MAGNETIC_INTERNAL.CheckFiniteMatrixGroup := function(group, name)',
+            'end;',
+        ].join('\n');
+        const qualifiedDefinitionDoc = makeDocument(
+            'qualified-definition.g',
+            qualifiedDefinitionCode,
+            tmp,
+        );
+        check('qualified definition hovers from the left identifier', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'MAGNETIC_INTERNAL')).includes('**function**'));
+        check('qualified definition hovers from the selector identifier', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'CheckFiniteMatrixGroup')).includes('**function**'));
+        check('qualified definition hovers from the dot', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, '.CheckFiniteMatrixGroup')).includes('**function**'));
         workspaceState.textDocuments.length = 0;
     } finally {
         workspaceState.folderPath = null;
@@ -468,12 +618,59 @@ async function main() {
         const doc = makeDocument('system.g', code, null);
         const hover = await hoverAt(provider, doc, 'Size(');
         check('GAP function shows the title', true,
-            textOf(hover).includes('**GAP function**'));
+            textOf(hover).includes('**built-in function**'));
+        check('GAP function signature is rendered as highlighted GAP code', true,
+            textOf(hover).includes('```gap\n'));
         check('GAP function shows the help link text', true,
             textOf(hover).includes('See more information in'));
         check('link targets the hovered name', 'Size', linkTerm(hover.contents));
         check('markdown trust limited to the term command',
             JSON.stringify(['gap.searchHelpTerm']), JSON.stringify(hover.contents.isTrusted.enabledCommands));
+
+        const helpData = require('../../../out/help/helpData');
+        const realGetHelpState = helpData.getHelpState;
+        const realGetConfiguration = vscodeMock.workspace.getConfiguration;
+        const helpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-help-'));
+        fs.mkdirSync(path.join(helpRoot, 'ref'), { recursive: true });
+        fs.writeFileSync(path.join(helpRoot, 'ref', 'chap30.html'), [
+            '<p id="XTEST"></p>',
+            '<h5>30.4-6 Size</h5>',
+            '<div class="func">Size( listorcoll )</div>',
+            '<p>Returns the size of a list or collection.</p>',
+        ].join('\n'));
+        helpData.getHelpState = () => ({
+            entries: [{
+                filePath: '/doc/ref/chap30.html#XTEST',
+                anchor: 'XTEST',
+                display: 'Size',
+                key: 'size',
+                book: 'Reference',
+                chapter: 30,
+                section: 4,
+                isTextOnly: false,
+                type: 'F',
+            }],
+            bookDescriptions: new Map(),
+        });
+        vscodeMock.workspace.getConfiguration = () => ({
+            get: key => key === 'docPath' ? helpRoot : key === 'pkgPath' ? helpRoot : undefined,
+        });
+        const described = await hoverAt(provider, doc, 'Size(');
+        check('GAP function includes a short help description', true,
+            textOf(described).includes('Returns the size of a list or collection.'));
+
+        dataManager.getFunctionNames = () => new Set();
+        const indexedBuiltin = await hoverAt(provider, doc, 'Size(');
+        check('help-indexed function hovers without completion data', true,
+            textOf(indexedBuiltin).includes('**built-in function**'));
+        const isBound = await hoverAt(provider, makeDocument('guard.g', 'if not IsBound(value) then\nfi;\n', null), 'IsBound(');
+        check('runtime built-in function hovers without completion data', true,
+            textOf(isBound).includes('**built-in function**'));
+
+        dataManager.getFunctionNames = realGet;
+        helpData.getHelpState = realGetHelpState;
+        vscodeMock.workspace.getConfiguration = realGetConfiguration;
+        fs.rmSync(helpRoot, { recursive: true, force: true });
 
         dataManager.getFunctionNames = realGet;
     }
