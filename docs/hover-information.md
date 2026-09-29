@@ -52,6 +52,10 @@ Symbolic operators are covered as well:
 - arithmetic and power: `+`, `-`, `*`, `/`, `^`;
 - ranges and variadic parameters: `..`, `...`.
 
+The `;` statement terminator also has a short Hover description. Keywords,
+constants, operators, and punctuation are rendered as syntax-highlighted GAP
+code inside the Hover.
+
 These descriptions are intentionally short and are not a replacement for the
 GAP language reference.
 

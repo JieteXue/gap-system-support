@@ -79,6 +79,10 @@ const OPERATOR_DESCRIPTIONS: Readonly<Record<string, { type: string; description
     '...': { type: 'variadic marker', description: 'Marks the final function parameter as accepting the remaining arguments.' },
 };
 
+const PUNCTUATION_DESCRIPTIONS: Readonly<Record<string, { type: string; description: string }>> = {
+    ';': { type: 'statement terminator', description: 'Ends the current statement.' },
+};
+
 function syntaxNodeAt(root: SyntaxNode, offset: number): SyntaxNode[] {
     const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
     return [
@@ -105,6 +109,12 @@ function operatorNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
     const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
     const node = root.descendantForIndex(clamped);
     return node && OPERATOR_DESCRIPTIONS[node.text] ? node : null;
+}
+
+function punctuationNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
+    const clamped = Math.max(0, Math.min(offset, root.endIndex - 1));
+    const node = root.descendantForIndex(clamped);
+    return node && PUNCTUATION_DESCRIPTIONS[node.text] ? node : null;
 }
 
 function selectorExpression(node: SyntaxNode): SyntaxNode {
@@ -147,14 +157,16 @@ function keywordMarkdown(keyword: string): vscode.MarkdownString {
     const info = KEYWORD_DESCRIPTIONS[keyword];
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${info.type}**\n\n`);
-    md.appendMarkdown(`\`${keyword}\`\n\n${info.description}`);
+    md.appendCodeblock(keyword, 'gap');
+    md.appendMarkdown(`\n\n${info.description}`);
     return md;
 }
 
 function literalMarkdown(literal: string): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown('**built-in constant**\n\n');
-    md.appendMarkdown(`\`${literal}\`\n\n${LITERAL_DESCRIPTIONS[literal]}`);
+    md.appendCodeblock(literal, 'gap');
+    md.appendMarkdown(`\n\n${LITERAL_DESCRIPTIONS[literal]}`);
     return md;
 }
 
@@ -162,7 +174,17 @@ function operatorMarkdown(operator: string): vscode.MarkdownString {
     const info = OPERATOR_DESCRIPTIONS[operator];
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${info.type}**\n\n`);
-    md.appendMarkdown(`\`${operator}\`\n\n${info.description}`);
+    md.appendCodeblock(operator, 'gap');
+    md.appendMarkdown(`\n\n${info.description}`);
+    return md;
+}
+
+function punctuationMarkdown(punctuation: string): vscode.MarkdownString {
+    const info = PUNCTUATION_DESCRIPTIONS[punctuation];
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${info.type}**\n\n`);
+    md.appendCodeblock(punctuation, 'gap');
+    md.appendMarkdown(`\n\n${info.description}`);
     return md;
 }
 
@@ -374,6 +396,13 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         const operator = operatorNodeAt(tree.rootNode, offset);
         if (operator) {
             return new vscode.Hover(operatorMarkdown(operator.text), this.rangeOf(document, operator));
+        }
+        const punctuation = punctuationNodeAt(tree.rootNode, offset);
+        if (punctuation) {
+            return new vscode.Hover(
+                punctuationMarkdown(punctuation.text),
+                this.rangeOf(document, punctuation),
+            );
         }
         const node = hoverSymbolNodeAt(tree.rootNode, offset);
         if (!node) {

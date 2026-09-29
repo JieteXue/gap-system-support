@@ -207,6 +207,8 @@ async function main() {
         check('fi keyword hovers', true, textOf(await hoverAt(provider, conditional, 'fi;')).includes('Ends a conditional'));
         check('fail literal hovers', true,
             textOf(await hoverAt(provider, doc, 'fail;')).includes('**built-in constant**'));
+        check('hover token is rendered as highlighted GAP code', true,
+            textOf(await hoverAt(provider, doc, 'fail;')).includes('```gap\nfail\n```'));
 
         const operatorCode = [
             'assigned := 1;',
@@ -249,6 +251,10 @@ async function main() {
             check(`${operator.trim()} operator hovers`, true,
                 textOf(await hoverInside(provider, operatorDoc, operator, offset)).includes(`**${type}**`));
         }
+        check('semicolon hovers', true,
+            textOf(await hoverAt(provider, operatorDoc, ';')).includes('**statement terminator**'));
+        check('semicolon is rendered as highlighted GAP code', true,
+            textOf(await hoverAt(provider, operatorDoc, ';')).includes('```gap\n;\n```'));
         // A position right after the name still hovers.
         check('definition name at word end still hovers', true, provider.provideHover(doc, { line: 0, character: 4 }, new CancellationTokenStub()) !== undefined);
     }
