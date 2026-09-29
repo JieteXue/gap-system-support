@@ -21,6 +21,10 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         this.resolver.onDocumentClosed(uri);
     }
 
+    onWorkspaceFilesChanged(): void {
+        this.resolver.onWorkspaceFilesChanged();
+    }
+
     provideDefinition(
         document: vscode.TextDocument,
         position: vscode.Position,

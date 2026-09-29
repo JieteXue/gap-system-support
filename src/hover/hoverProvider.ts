@@ -70,6 +70,10 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         this.resolver.onDocumentClosed(uri);
     }
 
+    onWorkspaceFilesChanged(): void {
+        this.resolver.onWorkspaceFilesChanged();
+    }
+
     provideHover(
         document: vscode.TextDocument,
         position: vscode.Position,

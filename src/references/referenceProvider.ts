@@ -46,21 +46,6 @@ function isOriginLocation(
     return true;
 }
 
-function collectSymbolNodes(root: SyntaxNode, lookupName: string): SyntaxNode[] {
-    const result: SyntaxNode[] = [];
-    const visit = (node: SyntaxNode): void => {
-        if (node.type === 'identifier' || node.type === 'string_content') {
-            const classified = symbolNameNodeAt(root, node.startIndex);
-            if (classified?.id === node.id && symbolLookupName(node) === lookupName) {
-                result.push(node);
-            }
-        }
-        for (const child of node.namedChildren) visit(child);
-    };
-    visit(root);
-    return result;
-}
-
 export class GAPReferenceProvider implements vscode.ReferenceProvider {
 
     private readonly resolver: GAPDefinitionResolver;

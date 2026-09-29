@@ -321,6 +321,28 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(doc => diagnosticsProvider.checkNow(doc)),
     );
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+        vscode.workspace.onDidCreateFiles(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+        vscode.workspace.onDidDeleteFiles(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+        vscode.workspace.onDidRenameFiles(() => {
+            hoverProvider.onWorkspaceFilesChanged();
+            definitionProvider.onWorkspaceFilesChanged();
+            referenceProvider.onWorkspaceFilesChanged();
+        }),
+    );
     // Enable/disable diagnostics when the gap.diagnostics setting changes.
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(e => {
@@ -342,12 +364,6 @@ export async function activate(context: vscode.ExtensionContext) {
             diagnosticsProvider.onDocumentClosed(doc.uri);
         }),
     );
-    context.subscriptions.push(
-        vscode.workspace.onDidCreateFiles(() => referenceProvider.onWorkspaceFilesChanged()),
-        vscode.workspace.onDidDeleteFiles(() => referenceProvider.onWorkspaceFilesChanged()),
-        vscode.workspace.onDidRenameFiles(() => referenceProvider.onWorkspaceFilesChanged()),
-    );
-
     // Register the completion data commands.
     context.subscriptions.push(
         vscode.commands.registerCommand('gap.generateCompletionData', () => generateData(context)),

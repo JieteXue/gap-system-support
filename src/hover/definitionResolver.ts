@@ -12,6 +12,8 @@ import { recordEntryLookupName } from '../shared/functionName';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
 import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT } from '../limits';
 
+const WORKSPACE_SYMBOL_CACHE_MS = 5000;
+
 /** A definition or Read call in the backward scan. */
 type FileEvent =
     | {
@@ -58,6 +60,15 @@ export interface ResolvedDefinition {
     column: number;
 }
 
+interface WorkspaceSymbolCacheEntry {
+    expiresAt: number;
+    results: {
+        event: Extract<FileEvent, { kind: 'def' }>;
+        lines: string[];
+        filePath: string;
+    }[];
+}
+
 export class GAPDefinitionResolver {
 
     private readonly query: LazyQuery;
@@ -72,10 +83,15 @@ export class GAPDefinitionResolver {
         string,
         { version: number; tree: Tree; events: FileEvent[]; scopeByStart: Set<number>; lines: string[] }
     >({ maxEntries: HOVER_DOCUMENT_CACHE_MAX_ENTRIES });
+    private readonly workspaceSymbolCache = new Map<string, WorkspaceSymbolCacheEntry>();
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.fileCache.onDocumentClosed(uri);
         this.documentCache.delete(uri.toString());
+    }
+
+    onWorkspaceFilesChanged(): void {
+        this.workspaceSymbolCache.clear();
     }
 
     /** Resolve the active definition for the given function name. */
@@ -201,7 +217,7 @@ export class GAPDefinitionResolver {
             true,
         );
         if (candidates.length === 0 && baseDir) {
-            candidates.push(...this.scanWorkspaceSymbolDefinitions(
+            candidates.push(...this.scanWorkspaceSymbolDefinitionsCached(
                 baseDir,
                 name,
                 currentFilePath,
@@ -232,6 +248,27 @@ export class GAPDefinitionResolver {
                 headerText: candidate.event.headerText,
                 name: candidate.event.name,
             }));
+    }
+
+    private scanWorkspaceSymbolDefinitionsCached(
+        baseDir: string,
+        name: string,
+        currentFilePath: string,
+    ): {
+        event: Extract<FileEvent, { kind: 'def' }>;
+        lines: string[];
+        filePath: string;
+    }[] {
+        const key = `${baseDir}\0${name}`;
+        const now = Date.now();
+        const cached = this.workspaceSymbolCache.get(key);
+        if (cached && cached.expiresAt > now) return cached.results;
+        const results = this.scanWorkspaceSymbolDefinitions(baseDir, name, currentFilePath);
+        this.workspaceSymbolCache.set(key, {
+            expiresAt: now + WORKSPACE_SYMBOL_CACHE_MS,
+            results,
+        });
+        return results;
     }
 
     /** Find top-level user definitions in sibling GAP source files. */
