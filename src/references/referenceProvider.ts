@@ -23,6 +23,23 @@ function definitionNameLength(lookupName: string): number {
     return lookupName.split(/[.!]/).filter(Boolean).pop()?.length ?? lookupName.length;
 }
 
+function isOriginLocation(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    location: vscode.Location,
+): boolean {
+    if (location.uri.toString() !== document.uri.toString()) return false;
+    const start = location.range.start;
+    const end = location.range.end;
+    if (position.line < start.line || position.line > end.line) return false;
+    if (start.line === end.line) {
+        return position.character >= start.character && position.character <= end.character;
+    }
+    if (position.line === start.line) return position.character >= start.character;
+    if (position.line === end.line) return position.character <= end.character;
+    return true;
+}
+
 function collectSymbolNodes(root: SyntaxNode, lookupName: string): SyntaxNode[] {
     const result: SyntaxNode[] = [];
     const visit = (node: SyntaxNode): void => {
@@ -80,7 +97,6 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         if (context.includeDeclaration) {
             for (const definition of definitions) {
                 const key = definitionKey(definition);
-                if (key === originKey || seen.has(key)) continue;
                 const definitionDocument = documents.find(candidate =>
                     definition.filePath === ''
                         ? candidate.uri.toString() === document.uri.toString()
@@ -89,7 +105,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                 const uri = definitionDocument?.uri ??
                     (definition.filePath === '' ? document.uri : vscode.Uri.file(definition.filePath));
                 const start = new vscode.Position(definition.row, definition.column);
-                locations.push(new vscode.Location(
+                const location = new vscode.Location(
                     uri,
                     new vscode.Range(
                         start,
@@ -98,7 +114,10 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                             definition.column + definitionNameLength(lookupName),
                         ),
                     ),
-                ));
+                );
+                if (key === originKey || seen.has(key) ||
+                    isOriginLocation(document, position, location)) continue;
+                locations.push(location);
                 seen.add(key);
             }
         }
@@ -116,7 +135,20 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                     candidate.startPosition.row,
                     candidate.startPosition.column,
                 );
-                if (key === originKey) continue;
+                const location = new vscode.Location(
+                    candidateDocument.uri,
+                    new vscode.Range(
+                        new vscode.Position(
+                            candidate.startPosition.row,
+                            candidate.startPosition.column,
+                        ),
+                        new vscode.Position(
+                            candidate.endPosition.row,
+                            candidate.endPosition.column,
+                        ),
+                    ),
+                );
+                if (key === originKey || isOriginLocation(document, position, location)) continue;
                 const isDefinition = definitionLocations.has(key);
                 if (isDefinition && !context.includeDeclaration) continue;
 
@@ -139,19 +171,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
 
                 if (seen.has(key)) continue;
                 seen.add(key);
-                locations.push(new vscode.Location(
-                    candidateDocument.uri,
-                    new vscode.Range(
-                        new vscode.Position(
-                            candidate.startPosition.row,
-                            candidate.startPosition.column,
-                        ),
-                        new vscode.Position(
-                            candidate.endPosition.row,
-                            candidate.endPosition.column,
-                        ),
-                    ),
-                ));
+                locations.push(location);
             }
         }
 

@@ -533,6 +533,40 @@ async function main() {
         check('nested record definition click returns its usage', [7],
             nestedClickTargets.map(location => location.range.start.line));
 
+        const directRecordCode = [
+            'A := rec(',
+            '    Print := function()',
+            '    end',
+            ');',
+            'A.Print();',
+        ].join('\n');
+        const directRecordDoc = makeDocument('direct-record.g', directRecordCode, null);
+        check('direct rec field resolves from its definition name', 1,
+            definitionStartLine(defineAt(provider, directRecordDoc, 'Print :=')));
+        const directClickTargets = await nestedClickableProvider.provideDefinition(
+            directRecordDoc,
+            positionOf(directRecordCode, 'Print :='),
+            new CancellationTokenStub(),
+        );
+        check('direct rec definition click omits itself', [4],
+            directClickTargets.map(location => location.range.start.line));
+
+        const dottedRecordCode = [
+            'MagneticEquivalence := rec(Matrix := rec());',
+            'MagneticEquivalence.Matrix.Block := function(x)',
+            '    return x;',
+            'end;',
+            'MagneticEquivalence.Matrix.Block(1);',
+        ].join('\n');
+        const dottedRecordDoc = makeDocument('dotted-record.g', dottedRecordCode, null);
+        const dottedClickTargets = await nestedClickableProvider.provideDefinition(
+            dottedRecordDoc,
+            positionOf(dottedRecordCode, 'Block :='),
+            new CancellationTokenStub(),
+        );
+        check('dotted rec definition click omits itself', [4],
+            dottedClickTargets.map(location => location.range.start.line));
+
         const dottedAssignmentCode = [
             'MagneticEquivalence := rec(Matrix := rec());',
             'MagneticEquivalence.Matrix.Block := function(x)',
