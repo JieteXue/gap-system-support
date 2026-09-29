@@ -1,9 +1,13 @@
-## Unreleased
+# Changelog
+
+## 0.4.0
 
 1. Expand Go to Definition across lexical symbols, qualified record/component paths, GAP declarations, bindings, installations, and multiple method implementations
 2. Add workspace Find All References and native Peek behavior with lexical scope, complete qualified-name matching, selected-occurrence exclusion, and direct navigation for definitions without references
 3. Add static Hover categories, built-in help summaries, language keyword/operator/punctuation descriptions, cross-file guarded lookup, and syntax-highlighted GAP snippets
 4. Cache parsed files, workspace symbol/reference indexes, help lookups, and documentation summaries to keep repeated editor requests responsive
+
+Special thanks to [@JieteXue](https://github.com/JieteXue) for contributing these features.
 
 ## 0.3.5
 
@@ -17,6 +21,7 @@
 1. Add Go to Definition and Peek Definition support through VS Code's DefinitionProvider API
 
 ## 0.3.3
+
 1. Update `README.md` and `README.zh-cn.md`
 
 ## 0.3.2

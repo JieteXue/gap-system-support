@@ -9,3 +9,4 @@ scripts/queryGenerator/**
 queries/highlights.source.scm
 images/**
 data/completionData/*.txt
+docs/**

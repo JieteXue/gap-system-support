@@ -99,7 +99,7 @@ source ~/.bashrc
 ## 设置项
 
 | 设置项 | 默认值 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `gap.docPath` | `""` | 手动填写 `doc/` 目录绝对路径 |
 | `gap.pkgPath` | `""` | 手动填写 `pkg/` 目录绝对路径 |
 | `gap.docAppearance` | `system` | 文档外观，`system` 跟随 VS Code 主题，`dark` / `light` 使用深色或浅色主题 |
@@ -114,7 +114,7 @@ source ~/.bashrc
 按 `Ctrl+Shift+P` 或 `F1` 打开命令面板，即可使用以下命令：
 
 | 命令 | 说明 |
-|---|---|
+| --- | --- |
 | `GAP: Run GAP File` | 当打开 GAP 文件时可用，在终端中运行当前 GAP 文件 |
 | `GAP: Configure GAP Command Line Options` | 通过 Quick Pick 配置 GAP 命令行选项 |
 | `GAP: Search GAP Help` | 搜索 GAP 帮助文档 |
@@ -158,6 +158,7 @@ npx @vscode/vsce package
 
 - 语法高亮基于 [tree-sitter-gap](https://github.com/gap-system/tree-sitter-gap) 的查询文件实现。
 - 扩展图标来自 [gap-logo](https://github.com/gap-system/gap-logo)。
+- 感谢 [@JieteXue](https://github.com/JieteXue) 对本项目的贡献，以及所有支持本项目开发的人。
 
 ## 第三方声明
 

@@ -99,7 +99,7 @@ Same behavior as `?topic` and `??topic` in GAP, and the demo shows `AllSmallGrou
 ## Settings
 
 | Setting | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `gap.docPath` | `""` | Manually enter the absolute path of the `doc/` directory |
 | `gap.pkgPath` | `""` | Manually enter the absolute path of the `pkg/` directory |
 | `gap.docAppearance` | `system` | Documentation appearance: `system` follows the VS Code theme, `dark` / `light` use a dark or light theme |
@@ -114,7 +114,7 @@ Same behavior as `?topic` and `??topic` in GAP, and the demo shows `AllSmallGrou
 Press `Ctrl+Shift+P` or `F1` to open the Command Palette and use the following commands:
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `GAP: Run GAP File` | Available when a GAP file is open; run the current GAP file in a terminal |
 | `GAP: Configure GAP Command Line Options` | Configure GAP command line options through Quick Pick |
 | `GAP: Search GAP Help` | Search GAP help documentation |
@@ -159,6 +159,7 @@ Then press `F5` to start debugging.
 
 - Syntax highlighting is implemented based on the [tree-sitter-gap](https://github.com/gap-system/tree-sitter-gap) query files.
 - The extension icon is from [gap-logo](https://github.com/gap-system/gap-logo).
+- Thanks to [@JieteXue](https://github.com/JieteXue) for contributing to this project, and to everyone who has supported its development.
 
 ## Third Party Notices
 
