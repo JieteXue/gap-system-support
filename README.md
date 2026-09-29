@@ -13,7 +13,8 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
 - **Semantic highlighting and syntax diagnostics**: based on `tree-sitter-gap`.
 - **Code completion**: provides completion for GAP constants, keywords, statement structures, and GAP functions (including functions from other GAP files loaded via `Read`).
 - **Hover hints**: hovering over a function name shows a help link for GAP functions; for user defined functions it shows the definition line and the `##` comments.
-- **Go to Definition**: native VS Code definition navigation for user defined functions.
+- **Definition navigation**: native Go to Definition and Peek Definition support for statically recognizable user-defined GAP symbols.
+- **Reference navigation**: native Find All References and Peek References support across GAP workspace files (`Shift+F12`).
 - **Running GAP code**: runs the current GAP file in the VS Code integrated terminal, with configurable GAP command line options.
 - **Help system**: built-in GAP help system with two search modes (switchable at any time in the settings or the Quick Pick search box), with results filterable by book.
   - **prefix**: same behavior as `?topic` in GAP
@@ -66,7 +67,7 @@ Tool Usage Examples
 
 <img src="./images/allsubgroups.png" alt="Language model tools demo" />
 
-### 2. Completion, Hover, and Go to Definition
+### 2. Completion, Hover, Definitions, and References
 
 <img src="./images/completion-hover-go.gif" alt="Completion, hover, and Go to definition demo" />
 

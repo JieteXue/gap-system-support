@@ -1,3 +1,8 @@
+## Unreleased
+
+1. Add Find All References and Peek References for statically recognizable GAP symbols across workspace files
+2. Preserve lexical scope and qualified record/component paths when finding references
+
 ## 0.3.5
 
 1. Add GAP syntax checking tool and integrate with diagnostics
