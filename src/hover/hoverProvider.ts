@@ -12,7 +12,7 @@ import { functionNameNodeAt, symbolLookupName, symbolNameNodeAt } from '../share
 import { resolveHelpPath } from '../path';
 import { BUILTIN_FUNCTION_NAMES } from '../completion/builtinNames';
 import { LruCache } from '../shared/lruCache';
-import { HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES } from '../limits';
+import { HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT } from '../limits';
 import type { SyntaxNode } from 'web-tree-sitter';
 import * as fs from 'fs';
 
@@ -198,7 +198,7 @@ function fallbackMarkdown(): vscode.MarkdownString {
  * Render the hover for a GAP function.
  * Shows the function title and a link into GAP Help.
  */
-interface BuiltinHelp {
+export interface BuiltinHelp {
     display: string;
     book: string;
     description?: string;
@@ -297,9 +297,10 @@ function findBuiltinHelp(name: string): BuiltinHelp | undefined {
     };
 }
 
-function systemMarkdown(name: string, help?: BuiltinHelp): vscode.MarkdownString {
+function systemMarkdown(name: string, help?: BuiltinHelp, inspectionLink?: string): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
-    md.isTrusted = { enabledCommands: ['gap.searchHelpTerm'] };
+    md.isTrusted = { enabledCommands: inspectionLink
+        ? ['gap.searchHelpTerm', 'gap.inspectDefinition'] : ['gap.searchHelpTerm'] };
     md.appendMarkdown('**built-in function**\n\n');
     md.appendCodeblock(help?.display || `${name}(...)`, 'gap');
     md.appendMarkdown('\n\n');
@@ -311,6 +312,7 @@ function systemMarkdown(name: string, help?: BuiltinHelp): vscode.MarkdownString
     md.appendMarkdown(
         `[GAP Help](command:gap.searchHelpTerm?${encodeURIComponent(JSON.stringify([name]))})`
     );
+    if (inspectionLink) md.appendMarkdown(`\n\n${inspectionLink}`);
     return md;
 }
 
@@ -350,9 +352,11 @@ function isIsBoundArgument(node: SyntaxNode): boolean {
  */
 function customMarkdown(
     resolved: ResolvedDefinition & { symbolType?: string },
+    inspectionLink?: string,
 ): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
-    md.isTrusted = { enabledCommands: ['gap.goToDefinition'] };
+    md.isTrusted = { enabledCommands: inspectionLink
+        ? ['gap.goToDefinition', 'gap.inspectDefinition'] : ['gap.goToDefinition'] };
     md.appendMarkdown(`**${resolved.symbolType || 'symbol'}**\n\n`);
     md.appendCodeblock(resolved.definitionText ?? resolved.definitionLine, 'gap');
     if (resolved.commentLines.length > 0) {
@@ -369,7 +373,17 @@ function customMarkdown(
         md.appendMarkdown('\n---\n\n');
         md.appendMarkdown(`Defined in ${definitionPathLink(resolved.filePath, resolved.row)}`);
     }
+    if (inspectionLink) md.appendMarkdown(`\n\n${inspectionLink}`);
     return md;
+}
+
+export interface HoverSymbolInformation {
+    name: string;
+    range: vscode.Range;
+    definitions: ResolvedDefinition[];
+    symbolType: string;
+    builtin?: BuiltinHelp | true;
+    isCall: boolean;
 }
 
 export class GAPHoverProvider implements vscode.HoverProvider {
@@ -377,6 +391,7 @@ export class GAPHoverProvider implements vscode.HoverProvider {
     constructor(
         completionPath: string,
         private readonly resolver = new GAPDefinitionResolver(completionPath),
+        private readonly inspectionLink?: (document: vscode.TextDocument, position: vscode.Position) => string,
     ) {}
 
     onDocumentClosed(uri: vscode.Uri): void {
@@ -385,6 +400,44 @@ export class GAPHoverProvider implements vscode.HoverProvider {
 
     onWorkspaceFilesChanged(): void {
         this.resolver.onWorkspaceFilesChanged();
+    }
+
+    resolveSymbol(document: vscode.TextDocument, position: vscode.Position): HoverSymbolInformation | null {
+        if (!isParserReady() || document.getText().length > READ_CONTENT_LIMIT) return null;
+        const tree = getDocumentTree(document);
+        const node = hoverSymbolNodeAt(tree.rootNode, document.offsetAt(position));
+        if (!node) return null;
+        const name = hoverLookupName(node);
+        const range = this.rangeOf(document, node);
+        const isFunctionName = functionNameNodeAt(tree.rootNode, node.startIndex)?.id === node.id;
+        const isBoundArgument = isIsBoundArgument(node);
+        const isSelector = selectorExpression(node).id !== node.id;
+        const isCall = isFunctionName || isCallCallee(node);
+        const help = findBuiltinHelp(name);
+        if (getFunctionNames()?.has(name) || BUILTIN_FUNCTION_NAMES.has(name) || help) {
+            return { name, range, definitions: [], symbolType: 'built-in function', builtin: help ?? true, isCall };
+        }
+        const lookupNames = this.resolver.resolveLookupNames(document, position, name);
+        const isAlias = lookupNames.some(candidate => candidate !== name);
+        let definitions = isAlias ? this.resolver.resolveDefinitions(document, position, name) : [];
+        let resolved: ResolvedDefinition | null = definitions[0] ??
+            (!isAlias ? this.resolver.resolveDefinition(document, position, name) : null);
+        if (!resolved && isBoundArgument) {
+            resolved = this.resolver.resolveDefinitionFromFutureReads(document, position, name) ??
+                this.resolver.resolveWorkspaceDefinition(document, name);
+        }
+        if (!resolved && (name.includes('.') || name.includes('!') || isSelector)) {
+            resolved = this.resolver.resolveWorkspaceDefinition(document, name);
+        }
+        if (!resolved && name.includes('.')) {
+            definitions = this.resolver.resolveDefinitions(document, position, name);
+            resolved = definitions[0] ?? null;
+        }
+        if (definitions.length === 0 && resolved) definitions = [resolved];
+        return {
+            name, range, definitions, isCall,
+            symbolType: resolved ? userSymbolType(isFunctionName, name, resolved) : 'symbol',
+        };
     }
 
     provideHover(
@@ -422,61 +475,20 @@ export class GAPHoverProvider implements vscode.HoverProvider {
             return undefined;
         }
 
-        const name = hoverLookupName(node);
-        // Cross-file resolution can evict this tree; retain only scalar context.
-        const range = this.rangeOf(document, node);
-        const isFunctionName = functionNameNodeAt(tree.rootNode, node.startIndex)?.id === node.id;
-        const isBoundArgument = isIsBoundArgument(node);
-        const isSelector = selectorExpression(node).id !== node.id;
-        const isCall = isFunctionName || isCallCallee(node);
-
-        // Gate 2: GAP functions win over user defined ones.
-        const systemNames = getFunctionNames();
-        const help = findBuiltinHelp(name);
-        if (systemNames?.has(name) || BUILTIN_FUNCTION_NAMES.has(name) || help) {
-            return new vscode.Hover(systemMarkdown(name, help), range);
+        const information = this.resolveSymbol(document, position);
+        if (!information) return undefined;
+        if (information.builtin) {
+            return new vscode.Hover(systemMarkdown(information.name,
+                information.builtin === true ? undefined : information.builtin,
+                this.inspectionLink?.(document, position)), information.range);
         }
-
-        // Gate 3: user-defined symbols resolved through the Read chain.
-        const lookupNames = this.resolver.resolveLookupNames(document, position, name);
-        const isAlias = lookupNames.some(candidate => candidate !== name);
-        let resolved = isAlias
-            ? this.resolver.resolveDefinitions(document, position, name)[0] ?? null
-            : this.resolver.resolveDefinition(document, position, name);
-        // A loader may use a symbol in an IsBound guard before Read() loads its definition.
-        if (!resolved && isBoundArgument) {
-            resolved = this.resolver.resolveDefinitionFromFutureReads(document, position, name);
-            if (!resolved) {
-                resolved = this.resolver.resolveWorkspaceDefinition(document, name);
-            }
+        if (information.definitions.length > 0) {
+            const contents = information.definitions.map(definition => customMarkdown(
+                { ...definition, symbolType: information.symbolType },
+                this.inspectionLink?.(document, position)));
+            return new vscode.Hover(contents.length === 1 ? contents[0] : contents, information.range);
         }
-        if (!resolved && (name.includes('.') || name.includes('!') ||
-            isSelector)) {
-            resolved = this.resolver.resolveWorkspaceDefinition(document, name);
-        }
-        if (!resolved && name.includes('.')) {
-            const definitions = this.resolver.resolveDefinitions(document, position, name);
-            if (definitions.length > 0) {
-                return new vscode.Hover(definitions.map(definition => customMarkdown({
-                    ...definition,
-                    symbolType: 'record field',
-                })), range);
-            }
-        }
-        if (resolved) {
-            return new vscode.Hover(
-                customMarkdown({
-                    ...resolved,
-                    symbolType: userSymbolType(isFunctionName, name, resolved),
-                }),
-                range,
-            );
-        }
-
-        // Preserve the old fallback only for call-like function names.
-        if (isCall) {
-            return new vscode.Hover(fallbackMarkdown(), range);
-        }
+        if (information.isCall) return new vscode.Hover(fallbackMarkdown(), information.range);
         return undefined;
     }
 

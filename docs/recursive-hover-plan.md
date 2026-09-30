@@ -1,155 +1,74 @@
-# Recursive Definition Hover Plan
+# Definition Panel Design
 
-Status: preparation only; nested Hover is not implemented.
+Status: implemented as a cursor-following right-hand pane. The original
+recursive-tooltip proposal was superseded by the requested simpler interface.
+Actual VS Code extension interaction testing remains user-led.
 
-## Goal
+## Interaction
 
-After inspecting a symbol's definition, hovering a resolvable symbol inside
-that definition should reveal its own definition. The same operation should
-continue across files, aliases, returned fields, and known parameter inputs
-without losing the original inspection context.
+- Keep native Hover, Go to Definition, and Find All References.
+- Open one reusable read-only pane beside the editor via its title icon,
+  the native Hover link, or `GAP: Show Definition Panel`.
+- Preserve source-editor focus and follow its insertion cursor/selection.
+- Show the complete AST-delimited definition with syntax highlighting,
+  comments, category, and source navigation.
+- Retain ambiguous origins in a selector rather than guessing one.
+- Do not expand nested tooltips or add pinning/history controls.
 
-Example path:
+The Hover entry carries the hovered occurrence's position, so opening it does
+not accidentally resolve the editor's unrelated insertion cursor. Later editor
+selection changes resume following. Focusing the webview leaves the current
+definition intact; switching to another GAP editor resolves that editor, while
+a non-GAP editor clears the content.
 
-```text
-character.generators
-  -> MakeSignCharacter's generators record entry
-  -> the generators parameter
-  -> a caller's local generators assignment
-```
+## Reuse And Source Mapping
 
-Each step must resolve at the displayed occurrence's real source location.
-Equal names alone are not sufficient evidence that two symbols are related.
+`GAPHoverProvider.resolveSymbol` is presentation-independent and shares the
+existing definition resolver, alias/read-chain handling, caller-input tracing,
+and help lookup. `DefinitionPreviewService` loads definitions through the
+resolver's shared open-document/file cache.
 
-## API Boundary
+`definitionExcerpt` exposes syntax-tree boundaries. Preview text is the original
+source slice, preserving CRLF, Unicode, delimiters, and indentation. Highlight
+tokens are immutable scalar ranges from the existing syntax query; the renderer
+never guesses offsets by searching for a repeated spelling. Query position
+ranges constrain highlighting to the displayed definition.
 
-Checked against the public API matching local VS Code 1.139.1, commit
-`04c0d99f4fb0d8afe6ce4f0c58e31e183ac3e4b1`, and the project's VS Code types.
-`Hover` exposes Markdown contents and an editor range; `HoverProvider` receives
-a source document position. `MarkdownString` supports highlighted code blocks,
-trusted command links, and a safe HTML subset, but no per-token Hover callbacks
-or embedded source-editor contract.
+## Performance And Lifecycle
 
-Reference: [VS Code API source at the checked commit](https://github.com/microsoft/vscode/blob/04c0d99f4fb0d8afe6ce4f0c58e31e183ac3e4b1/src/vscode-dts/vscode.d.ts).
+Selection changes are debounced by 140 ms; only the final position is resolved.
+No symbols inside the displayed definition are eagerly resolved. Cached results
+are bounded to 64 entries with a five-second TTL and keys including URI,
+document version, position, and resolver revision. Highlight output is bounded
+to 8,000 tokens and Hover entry tickets to 128. Existing file-size and inference
+work limits continue to apply.
 
-Consequently, a stable public extension API cannot make arbitrary tokens inside
-the existing native Markdown tooltip request another native tooltip just by
-moving the mouse. Enabling HTML does not supply that interaction contract.
-Do not inject scripts or manipulate VS Code workbench DOM to emulate it.
-
-## Recommended Experience
-
-Retain the current native Hover and add one explicit entry command/link to a
-read-only definition inspection webview. Once opened, its source tokens support
-actual mouse-triggered nested previews. The first entry needs a click; deeper
-inspection does not need to navigate away or click through every definition.
-This is a deliberate interaction tradeoff, not native hover-in-hover.
-
-Native Peek Definition remains a low-cost alternative for inspecting actual
-source and using the existing Hover provider in its editor. It is not the
-same as a recursive floating-tooltip stack.
-
-The proposed webview should provide:
-
-- The complete AST-delimited definition and source location.
-- Nested previews anchored to the selected token, retaining parent previews.
-- Segment-specific resolution of roots, intermediate records, and leaf fields.
-- A source-location chooser when several origins are possible.
-- Pin, close, back, forward, and open-source actions with named tooltips.
-- Escape to close the deepest preview; keyboard focus can inspect tokens too.
-- Stable behavior while the pointer moves from parent token into child preview.
-- Theme-aware, constrained widths and scrollable long definitions.
-- No guessed field origin for unknown parameters or dynamic selectors.
-
-Keep normal editor Hover, Go to Definition, and Find All References unchanged.
-
-## Shared Data Model
-
-Introduce a renderer-independent definition preview model with:
-
-- Source URI, document version, exact excerpt range, and source text.
-- Symbol category, comment text, and all candidate definition identities.
-- Immutable tokens carrying source ranges and classification.
-- A revision/request identifier for detecting invalidated views and stale replies.
-
-Extend AST-delimited extraction to return the excerpt range together with its
-text. Preserve the current semicolon, nested-record, and neighboring-definition
-rules. Never recover source positions by searching for token text in a formatted
-snippet: repeated names, indentation, CRLF, and Unicode make that ambiguous.
-
-Extract presentation-independent symbol resolution from the native Hover
-provider only where the new consumer needs it. Both renderers must use the
-existing shared resolver, source loader, alias history, and value tracing.
-Reuse the existing symbol classifier and syntax queries for token generation.
-No second workspace scanner or independent inference engine is needed.
-
-Webview messages should identify a session, preview, token, and request.
-The extension owns the corresponding document positions and validates the
-token before resolving it. The webview must not supply arbitrary file paths,
-commands, source text, or expression strings to execute.
-
-## Performance And Lifetime
-
-Resolve only the hovered token, with a short dwell delay; do not expand every
-symbol in a definition eagerly. Cancel pending work when the pointer or focus
-moves and discard replies from obsolete requests.
-
-Start with a maximum of eight preview levels, 32 history entries, and a bounded
-64-entry preview cache per session. Put adjustable limits in `src/limits.ts`.
-Existing file-size, expression-work, and recursion limits still apply.
-
-Cache keys must include source URI/version, token position, and resolution
-revision. Workspace changes invalidate previews, including results influenced
-by imported aliases or caller arguments. Refresh changed source before reusing
-old token positions; never silently resolve an old offset against new text.
-
-Store scalar ranges and token data, not long-lived native SyntaxNodes. Any
-temporary tree copies must be released before asynchronous UI waits. Closing
-the panel disposes subscriptions, pending requests, history, and cached previews.
+Unsaved edits, file saves, close/create/delete/rename events, and external GAP
+file changes invalidate snapshots. The current editor position is re-resolved
+instead of applying old offsets to new text. The file watcher and editor
+listeners exist only while the pane is open. Closing the pane cancels the timer
+and releases previews, cache, watcher, and listeners; extension disposal also
+releases the compiled highlight query.
 
 ## Safety
 
-Use a restrictive webview CSP, nonce-bound local scripts, and no remote scripts.
-Escape source and comment text; avoid treating documentation or GAP strings
-as trusted HTML. Allowlist the native Hover entry command instead of granting
-general command trust.
+The local webview uses a restrictive CSP and nonce-bound script. Source and
+comments are rendered with text nodes, never HTML. Native Hover trusts only
+specific entry/navigation commands. Entry links carry bounded, unguessable
+tickets for server-owned source positions, not client-supplied paths.
 
-Messages can request inspection or navigation only for token identities already
-issued to that session. Invalid, obsolete, out-of-range, and cross-session
-messages must be rejected. Neither renderer evaluates GAP.
+Source-navigation messages must match the current session/epoch and an issued
+candidate index. The host uses its own preview URI and source coordinates,
+validates freshness, and rejects obsolete or forged requests. Neither renderer
+evaluates GAP.
 
-## Implementation Order
+## Verification
 
-1. Verify the interaction tradeoff and prototype parent-to-child pointer/focus
-   behavior in an actual Extension Development Host.
-2. Add source-range-aware extraction and immutable preview models, preserving
-   existing Hover output and symbol resolution behavior.
-3. Implement the minimal panel/session/message protocol and one nested level.
-4. Add deeper previews, ambiguity selection, history, pinning, and bounded caches.
-5. Add lifecycle, security, and source-mapping regressions; package a local VSIX
-   for user-led extension testing before publishing.
+Automated coverage includes full definition boundaries, original CRLF/Unicode
+source, highlight categories, nested aliases, alternate return origins,
+installation calls, built-ins, cursor debounce, editor switching, unsaved edits,
+safe source navigation, ticket expiry, CSP, and disposal.
 
-## Acceptance Checks
-
-- The reported `time_axes.g` parameter field resolves to `characters.g`, and
-  symbols in that displayed definition can be inspected again.
-- Alias roots, intermediate fields, and leaf functions resolve independently.
-- Multiple parameter inputs remain distinct candidates; unrelated same-named
-  functions and shadowed locals are excluded.
-- Source mapping works with repeated identifiers, CRLF, Unicode, and multiline
-  definitions; neighboring definitions do not appear accidentally.
-- Pointer movement into a child does not dismiss its parents prematurely.
-- Circular relationships, rapid pointer movement, and parser eviction terminate
-  safely without showing stale content.
-- Unsaved edits and file creation/deletion/rename invalidate affected views.
-- Malicious source strings and forged webview messages cannot execute commands.
-- Full `npm test` continues to pass; isolated renderer tests are not presented
-  as substitutes for actual VS Code extension testing.
-
-## Preparation Progress
-
-- Upstream fetched and merged; conflicts resolved while preserving newer
-  navigation, caching, and parameter-field fixes.
-- Local VS Code public Hover API checked.
-- Source mapping, interaction boundary, reuse, limits, and acceptance cases defined.
-- Prototype and feature implementation remain pending.
+Isolated renderer checks are not actual VS Code extension tests. The local
+VSIX is intended for user-led testing in the default VS Code window, without
+depending on an Extension Development Host debugger.

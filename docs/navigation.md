@@ -111,9 +111,11 @@ blocking the editor.
 
 ## Verification
 
-The proposed interactive nested inspection experience is recorded separately
-in [Recursive Definition Hover Plan](recursive-hover-plan.md). It is a design
-plan, not a feature of the current native Hover.
+The cursor-following right-hand definition pane is described in
+[Hover Information](hover-information.md#definition-panel). It shares the
+native Hover resolver and syntax queries; it does not implement recursive
+tooltips. The revised implementation design is recorded in
+[Definition Panel Design](recursive-hover-plan.md).
 
 The automated suite covers:
 

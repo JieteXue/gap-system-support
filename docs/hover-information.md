@@ -4,6 +4,27 @@ The extension provides lightweight static information when the pointer rests on
 a GAP token. It does not execute GAP code and does not infer the runtime type
 of a value.
 
+## Definition Panel
+
+Click the editor-title symbol icon, **Show definition panel** in a symbol's
+native Hover, or run **GAP: Show Definition Panel**. A read-only editor pane
+opens to the right without taking focus from the source editor. It follows
+the editor's insertion cursor/selection, not mouse movement over source text.
+The Hover link initially shows the hovered occurrence even if the insertion
+cursor is elsewhere; subsequent cursor moves resume normal following.
+
+The pane uses the same static resolver as native Hover. Complete definitions
+retain their original whitespace and receive Tree-sitter syntax highlighting.
+It also shows comments, category, and a source link. Multiple possible origins
+have a chooser; built-ins show their signature/help summary and link to GAP Help.
+Unresolvable positions show an empty state rather than a previous definition.
+
+Updates are debounced by 140 ms. Unsaved edits and workspace file changes
+invalidate cached results and re-resolve the current editor cursor. Focusing
+the panel preserves its contents; switching to a non-GAP editor clears them.
+Closing it releases its listeners, file watcher, pending update, and previews.
+There are no recursive layers, pin actions, or independent navigation history.
+
 ## Aliases And Returned Fields
 
 Suppose a workspace source file defines `MagneticEquivalence.Compare` as a

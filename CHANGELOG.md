@@ -3,6 +3,7 @@
 ## Unreleased
 
 1. Resolve fields of function parameters from statically recognizable workspace callers, including wrapper calls and `for` list element bindings; match callee definition identities to exclude unrelated functions
+2. Add a cursor-following, syntax-highlighted definition panel to the right, opened from the editor-title icon, native Hover, or the command palette; refresh unsaved edits and imported origins without recursive tooltip layers
 
 ## 0.4.1 - 2026-09-30
 

@@ -146,6 +146,13 @@
         "category": "GAP"
       },
       {
+        "command": "gap.inspectDefinition",
+        "title": "Show Definition Panel",
+        "category": "GAP",
+        "icon": "$(symbol-class)",
+        "enablement": "editorLangId == gap"
+      },
+      {
         "command": "gap.rebuildHelpIndex",
         "title": "Rebuild Help Index",
         "category": "GAP"
@@ -202,6 +209,11 @@
       ],
       "editor/title": [
         {
+          "command": "gap.inspectDefinition",
+          "when": "resourceLangId == gap",
+          "group": "navigation@2"
+        },
+        {
           "command": "gap.runFile",
           "when": "resourceLangId == gap && resourceScheme != untitled",
           "group": "navigation"
@@ -225,6 +237,11 @@
         }
       ],
       "gap.contextMenu": [
+        {
+          "command": "gap.inspectDefinition",
+          "when": "resourceLangId == gap",
+          "group": "0_navigation@1"
+        },
         {
           "command": "gap.configureFlags",
           "group": "1_run@1"
@@ -504,6 +521,7 @@
     "test": "node test/run-all.js"
   },
   "dependencies": {
+    "@vscode/codicons": "0.0.46-24",
     "web-tree-sitter": "^0.24.6"
   },
   "devDependencies": {

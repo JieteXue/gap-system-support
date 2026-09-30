@@ -26,6 +26,11 @@ export const VALUE_ORIGIN_MAX_DEPTH = 48;
 /** Maximum expression visits per returned-field lookup. */
 export const VALUE_ORIGIN_MAX_STEPS = 1000;
 
+/** Bounded definition panel snapshots, highlight tokens, and native entry tickets. */
+export const INSPECTION_CACHE_MAX_ENTRIES = 64;
+export const INSPECTION_MAX_TOKENS = 8000;
+export const INSPECTION_LINK_MAX_ENTRIES = 128;
+
 /** Parsed help descriptions retained for Hover. */
 export const HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES = 256;
 

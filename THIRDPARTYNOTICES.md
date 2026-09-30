@@ -35,3 +35,13 @@ The GAP logo used in this extension is (c) Max Horn and a trademark of the
 GAP project. It is licensed under the Creative Commons Attribution-ShareAlike
 4.0 International License. See https://github.com/gap-system/gap-logo for the
 source. License: https://creativecommons.org/licenses/by-sa/4.0/
+
+## VS Code Codicons
+
+The definition panel uses the unmodified icon font and stylesheet from
+`@vscode/codicons`, by Microsoft Corporation:
+https://github.com/microsoft/vscode-codicons.
+Licensed under Creative Commons Attribution 4.0 International:
+https://creativecommons.org/licenses/by/4.0/.
+The package's complete license is included at
+`node_modules/@vscode/codicons/LICENSE` in the packaged extension.

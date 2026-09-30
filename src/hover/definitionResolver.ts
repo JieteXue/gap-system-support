@@ -140,6 +140,20 @@ export class GAPDefinitionResolver {
     private resolvingValueFields = false;
     private workspaceRevision = 0;
 
+    get revision(): number {
+        return this.workspaceRevision;
+    }
+
+    sourceDocument(filePath: string, current: vscode.TextDocument): vscode.TextDocument | null {
+        return !filePath || filePath === current.uri.fsPath ? current :
+            this.readSourceDocument(filePath);
+    }
+
+    readSourceDocument(filePath: string): vscode.TextDocument | null {
+        return vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath) ??
+            this.fileCache.loadFile(filePath)?.document ?? null;
+    }
+
     onDocumentClosed(uri: vscode.Uri): void {
         this.fileCache.onDocumentClosed(uri);
         this.documentCache.delete(uri.toString());
@@ -179,9 +193,7 @@ export class GAPDefinitionResolver {
     }
 
     private valueSource(filePath: string, current: vscode.TextDocument): ValueSource | null {
-        const document = !filePath || filePath === current.uri.fsPath ? current :
-            vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath) ??
-            this.fileCache.loadFile(filePath)?.document;
+        const document = this.sourceDocument(filePath, current);
         if (!document) return null;
         const model = this.documentModel(document);
         return model ? {
