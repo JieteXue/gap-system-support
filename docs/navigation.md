@@ -111,6 +111,10 @@ blocking the editor.
 
 ## Verification
 
+The proposed interactive nested inspection experience is recorded separately
+in [Recursive Definition Hover Plan](recursive-hover-plan.md). It is a design
+plan, not a feature of the current native Hover.
+
 The automated suite covers:
 
 - same-file and cross-file definitions;
