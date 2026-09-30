@@ -595,6 +595,25 @@ async function main() {
             textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'CheckFiniteMatrixGroup')).includes('**function**'));
         check('qualified definition hovers from the dot', true,
             textOf(await hoverAt(provider, qualifiedDefinitionDoc, '.CheckFiniteMatrixGroup')).includes('**function**'));
+
+        fs.writeFileSync(path.join(tmp, 'magnetic-equivalence.g'), [
+            'MagneticEquivalence := rec(',
+            '    Compare := function(value)',
+            '        return value;',
+            '    end',
+            ');',
+        ].join('\n'));
+        const aliasCode = [
+            'Read("magnetic-equivalence.g");',
+            'ME := MagneticEquivalence;',
+            'ME.Compare(1);',
+            'ME;',
+        ].join('\n');
+        const aliasDoc = makeDocument('alias-use.g', aliasCode, tmp);
+        check('cross-file alias root hovers through its target', true,
+            textOf(await hoverAt(provider, aliasDoc, 'ME;', 0)).includes('MagneticEquivalence := rec'));
+        check('cross-file alias member hovers through its target', true,
+            textOf(await hoverAt(provider, aliasDoc, 'Compare(1)')).includes('**function**'));
         workspaceState.textDocuments.length = 0;
     } finally {
         workspaceState.folderPath = null;

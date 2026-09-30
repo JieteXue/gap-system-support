@@ -34,7 +34,15 @@ type FileEvent =
         symbolKind: 'parameter' | 'variable' | 'function' | 'global-function' | 'operation' | 'method' | 'attribute' | 'global';
         role: 'local' | 'declaration' | 'implementation';
     }
-    | { kind: 'read'; pathText: string; offset: number };
+    | { kind: 'read'; pathText: string; offset: number }
+    | {
+        kind: 'alias';
+        name: string;
+        target: string;
+        offset: number;
+        end: number;
+        scope: number;
+    };
 
 /** The key of the always visible global scope. */
 const GLOBAL_SCOPE = -1;
@@ -144,6 +152,10 @@ export class GAPDefinitionResolver {
         const baseDir = resolveReadBaseDir(document);
         // Untitled documents have no real file: no Go to Definition link.
         const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
+        const lookupNames = this.resolveAliasNames(events, name, offset, baseDir);
+        const resolutionNames = lookupNames.size > 1
+            ? new Set([...lookupNames].filter(candidate => candidate !== name))
+            : lookupNames;
 
         // Phase 0: hovering the definition's own name shows that definition.
         for (const event of events) {
@@ -156,9 +168,10 @@ export class GAPDefinitionResolver {
         const visible = this.visibleScopes(tree, offset, scopeByStart);
         const scoped = events.filter(
             (e): e is Extract<FileEvent, { kind: 'def' }> =>
-                e.kind === 'def' && visible.has(e.scope) && e.end < offset,
+                e.kind === 'def' && visible.has(e.scope) && e.end < offset &&
+                resolutionNames.has(e.name),
         );
-        const scopedHit = this.pickLatestByName(scoped, name);
+        const scopedHit = this.pickLatest(scoped);
         if (scopedHit) {
             return this.toDefinition({ lines, row: scopedHit.row, column: scopedHit.column, filePath: currentFilePath, headerText: scopedHit.headerText, name: scopedHit.name, symbolKind: scopedHit.symbolKind });
         }
@@ -166,10 +179,16 @@ export class GAPDefinitionResolver {
         // Phase 2: global fallback over Read chains and remaining global events.
         // Only events at or before the hover offset take part; Read events keep the chain order.
         const globalScan = events.filter(
-            e => e.offset <= offset && (e.kind === 'read' || e.scope === GLOBAL_SCOPE),
+            e => e.offset <= offset &&
+                (e.kind === 'read' || (e.kind === 'def' && e.scope === GLOBAL_SCOPE)),
         );
-        const start = this.scanBackwards(globalScan, lines, new Set([name]), baseDir, new Set(), currentFilePath);
-        return start ? this.toDefinition(start) : null;
+        const start = this.scanBackwards(globalScan, lines, resolutionNames, baseDir, new Set(), currentFilePath);
+        if (start) return this.toDefinition(start);
+        if (resolutionNames.size !== 1 || !resolutionNames.has(name)) {
+            const fallback = this.scanBackwards(globalScan, lines, new Set([name]), baseDir, new Set(), currentFilePath);
+            return fallback ? this.toDefinition(fallback) : null;
+        }
+        return null;
     }
 
     /**
@@ -311,21 +330,22 @@ export class GAPDefinitionResolver {
         const baseDir = resolveReadBaseDir(document);
         const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
         const offset = document.offsetAt(position);
-        const candidates = this.scanAllSymbolDefinitions(
-            events,
-            lines,
-            name,
-            offset,
-            baseDir,
-            new Set(),
-            currentFilePath,
-            true,
-        );
+        const lookupNames = this.resolveAliasNames(events, name, offset, baseDir);
+        const resolutionNames = lookupNames.size > 1
+            ? [...lookupNames].filter(candidate => candidate !== name)
+            : [...lookupNames];
+        const candidates = resolutionNames.flatMap(lookupName => this.scanAllSymbolDefinitions(
+            events, lines, lookupName, offset, baseDir, new Set(), currentFilePath, true,
+        ));
         if (candidates.length === 0 && baseDir) {
-            candidates.push(...this.scanWorkspaceSymbolDefinitionsCached(
-                baseDir,
-                name,
-                currentFilePath,
+            const names = resolutionNames.length > 0 ? resolutionNames : [name];
+            for (const lookupName of names) {
+                candidates.push(...this.scanWorkspaceSymbolDefinitionsCached(baseDir, lookupName, currentFilePath));
+            }
+        }
+        if (candidates.length === 0 && resolutionNames.length !== 1) {
+            candidates.push(...this.scanAllSymbolDefinitions(
+                events, lines, name, offset, baseDir, new Set(), currentFilePath, true,
             ));
         }
 
@@ -440,6 +460,7 @@ export class GAPDefinitionResolver {
                 continue;
             }
 
+            if (event.kind !== 'read') continue;
             if (!baseDir || (currentFile && event.offset > maxOffset)) continue;
             const target = resolveReadTarget(event.pathText, baseDir);
             if (!target || visited.has(target)) continue;
@@ -489,6 +510,61 @@ export class GAPDefinitionResolver {
         return best;
     }
 
+    /** Pick the latest definition when the lookup has already been normalized. */
+    private pickLatest(defs: Extract<FileEvent, { kind: 'def' }>[]) {
+        let best: Extract<FileEvent, { kind: 'def' }> | null = null;
+        for (const definition of defs) {
+            if (!best || definition.end > best.end) best = definition;
+        }
+        return best;
+    }
+
+    /**
+     * Expand direct GAP aliases such as `ME := MagneticEquivalence`.
+     * This is deliberately conservative: only aliases visible before the
+     * cursor and reachable through literal Read() calls are considered.
+     */
+    private resolveAliasNames(
+        events: FileEvent[],
+        name: string,
+        maxOffset: number,
+        baseDir: string | null,
+    ): Set<string> {
+        const aliases = new Map<string, string>();
+        const visited = new Set<string>();
+
+        const collect = (fileEvents: FileEvent[], limit: number, filePath: string): void => {
+            for (const event of fileEvents) {
+                if (event.offset > limit) break;
+                if (event.kind === 'alias' && event.scope === GLOBAL_SCOPE) {
+                    aliases.set(event.name, event.target);
+                } else if (event.kind === 'read' && baseDir) {
+                    const target = resolveReadTarget(event.pathText, baseDir);
+                    if (!target || visited.has(target)) continue;
+                    visited.add(target);
+                    const read = this.fileCache.loadFile(target);
+                    if (read) collect(read.events, Number.POSITIVE_INFINITY, target);
+                }
+            }
+        };
+
+        collect(events, maxOffset, '');
+        const names = new Set<string>([name]);
+        const suffixIndex = name.indexOf('.');
+        const root = suffixIndex < 0 ? name : name.slice(0, suffixIndex);
+        const suffix = suffixIndex < 0 ? '' : name.slice(suffixIndex);
+        const seenRoots = new Set<string>();
+        let currentRoot = root;
+        while (!seenRoots.has(currentRoot)) {
+            seenRoots.add(currentRoot);
+            const target = aliases.get(currentRoot);
+            if (!target) break;
+            names.add(target + suffix);
+            currentRoot = target;
+        }
+        return names;
+    }
+
     /** Scan backward through the current file and nested Read files. */
     private scanBackwards(
         events: FileEvent[],
@@ -512,7 +588,7 @@ export class GAPDefinitionResolver {
                 if (names.has(event.name)) {
                     return { lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name, symbolKind: event.symbolKind };
                 }
-            } else if (baseDir) {
+            } else if (event.kind === 'read' && baseDir) {
                 const target = resolveReadTarget(event.pathText, baseDir);
                 if (!target || visited.has(target)) continue;
                 visited.add(target);
@@ -653,6 +729,40 @@ export class GAPDefinitionResolver {
             for (const child of node.namedChildren) collectRecordFields(child);
         };
         collectRecordFields(rootNode);
+
+        // Preserve simple value aliases for qualified-name resolution.
+        const collectAliases = (node: SyntaxNode): void => {
+            if (node.type === 'assignment_statement') {
+                const left = node.childForFieldName('left');
+                const right = node.childForFieldName('right');
+                if (left?.type === 'identifier' &&
+                    (right?.type === 'identifier' ||
+                        right?.type === 'record_selector' ||
+                        right?.type === 'component_selector') &&
+                    !hasErrorAncestor(left) &&
+                    !hasErrorAncestor(right)) {
+                    let scope = GLOBAL_SCOPE;
+                    let current: SyntaxNode | null = left.parent;
+                    while (current && current.type !== 'source_file') {
+                        if (scopeByStart.has(current.startIndex)) {
+                            scope = current.startIndex;
+                            break;
+                        }
+                        current = current.parent;
+                    }
+                    events.push({
+                        kind: 'alias',
+                        name: left.text,
+                        target: right.text,
+                        offset: left.startIndex,
+                        end: left.endIndex,
+                        scope,
+                    });
+                }
+            }
+            for (const child of node.namedChildren) collectAliases(child);
+        };
+        collectAliases(rootNode);
 
         // Attach every definition to its innermost enclosing scope, as scoped.ts does.
         for (const {

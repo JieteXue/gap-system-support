@@ -675,6 +675,38 @@ async function main() {
             workspaceState.folderPath = null;
             fs.rmSync(workspaceTmp, { recursive: true, force: true });
         }
+
+        const aliasTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-definition-alias-'));
+        try {
+            workspaceState.folderPath = aliasTmp;
+            fs.writeFileSync(path.join(aliasTmp, 'magnetic-equivalence.g'), [
+                'MagneticEquivalence := rec(',
+                '    Compare := function(value)',
+                '        return value;',
+                '    end',
+                ');',
+            ].join('\n'));
+            const aliasCode = [
+                'Read("magnetic-equivalence.g");',
+                'ME := MagneticEquivalence;',
+                'ME.Compare(1);',
+                'ME;',
+            ].join('\n');
+            const aliasDoc = makeDocument('alias-use.g', aliasCode, aliasTmp);
+            const aliasRoot = defineAt(provider, aliasDoc, 'ME;', 0);
+            const aliasMember = defineAt(provider, aliasDoc, 'Compare(1)');
+            check('cross-file alias root jumps to the target definition', true,
+                aliasRoot !== undefined &&
+                aliasRoot.uri.fsPath === path.join(aliasTmp, 'magnetic-equivalence.g') &&
+                aliasRoot.range.start.line === 0);
+            check('cross-file alias member jumps to the target field', true,
+                aliasMember !== undefined &&
+                aliasMember.uri.fsPath === path.join(aliasTmp, 'magnetic-equivalence.g') &&
+                aliasMember.range.start.line === 1);
+        } finally {
+            workspaceState.folderPath = null;
+            fs.rmSync(aliasTmp, { recursive: true, force: true });
+        }
     }
 
     summary();
