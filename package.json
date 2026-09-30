@@ -149,7 +149,10 @@
         "command": "gap.inspectDefinition",
         "title": "Show Definition Panel",
         "category": "GAP",
-        "icon": "$(symbol-class)",
+        "icon": {
+          "light": "icon/definition-light.svg",
+          "dark": "icon/definition-dark.svg"
+        },
         "enablement": "editorLangId == gap"
       },
       {

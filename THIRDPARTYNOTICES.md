@@ -36,6 +36,10 @@ GAP project. It is licensed under the Creative Commons Attribution-ShareAlike
 4.0 International License. See https://github.com/gap-system/gap-logo for the
 source. License: https://creativecommons.org/licenses/by-sa/4.0/
 
+The `icon/definition-light.svg` and `icon/definition-dark.svg` toolbar icons
+are simplified monochrome adaptations of that logo, redrawn for a 16px grid.
+They are distributed under the same CC BY-SA 4.0 license.
+
 ## VS Code Codicons
 
 The definition panel uses the unmodified icon font and stylesheet from
