@@ -9,6 +9,8 @@ import { ReadChainFileCache, resolveReadBaseDir, resolveReadTarget } from '../sh
 import { LruCache } from '../shared/lruCache';
 import { LazyQuery } from '../shared/lazyQuery';
 import { recordEntryLookupName } from '../shared/functionName';
+import { definitionText } from '../shared/definitionText';
+import { resolveValueFieldDefinitions } from './valueOriginResolver';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
 import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT } from '../limits';
 
@@ -31,6 +33,7 @@ type FileEvent =
          * Null for lambdas and definitions without a parameter list.
          */
         headerText: string | null;
+        definitionText?: string;
         symbolKind: 'parameter' | 'variable' | 'function' | 'global-function' | 'operation' | 'method' | 'attribute' | 'global';
         role: 'local' | 'declaration' | 'implementation';
     }
@@ -68,6 +71,8 @@ export type DefinitionSymbolKind =
 export interface ResolvedDefinition {
     /** The trimmed definition line. */
     definitionLine: string;
+    /** Complete AST-delimited definition for the hover code block. */
+    definitionText?: string;
     /** Comment lines directly above the definition. */
     commentLines: string[];
     /** Absolute path of the file containing the definition, or '' for untitled. */
@@ -104,6 +109,7 @@ export class GAPDefinitionResolver {
         { version: number; tree: Tree; events: FileEvent[]; scopeByStart: Set<number>; lines: string[] }
     >({ maxEntries: HOVER_DOCUMENT_CACHE_MAX_ENTRIES });
     private readonly workspaceSymbolCache = new Map<string, WorkspaceSymbolCacheEntry>();
+    private resolvingValueFields = false;
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.fileCache.onDocumentClosed(uri);
@@ -160,7 +166,7 @@ export class GAPDefinitionResolver {
         // Phase 0: hovering the definition's own name shows that definition.
         for (const event of events) {
             if (event.kind === 'def' && event.name === name && event.offset <= offset && offset <= event.end) {
-                return this.toDefinition({ lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name, symbolKind: event.symbolKind });
+                return this.toDefinition({ lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, definitionText: event.definitionText, name: event.name, symbolKind: event.symbolKind });
             }
         }
 
@@ -173,7 +179,7 @@ export class GAPDefinitionResolver {
         );
         const scopedHit = this.pickLatest(scoped);
         if (scopedHit) {
-            return this.toDefinition({ lines, row: scopedHit.row, column: scopedHit.column, filePath: currentFilePath, headerText: scopedHit.headerText, name: scopedHit.name, symbolKind: scopedHit.symbolKind });
+            return this.toDefinition({ lines, row: scopedHit.row, column: scopedHit.column, filePath: currentFilePath, headerText: scopedHit.headerText, definitionText: scopedHit.definitionText, name: scopedHit.name, symbolKind: scopedHit.symbolKind });
         }
 
         // Phase 2: global fallback over Read chains and remaining global events.
@@ -252,6 +258,7 @@ export class GAPDefinitionResolver {
                     column: candidate.column,
                     filePath: candidate.filePath || currentFilePath,
                     headerText: candidate.headerText,
+                    definitionText: candidate.definitionText,
                     name: candidate.name,
                     symbolKind: candidate.symbolKind,
                 });
@@ -279,6 +286,7 @@ export class GAPDefinitionResolver {
             column: candidate.event.column,
             filePath: candidate.filePath,
             headerText: candidate.event.headerText,
+            definitionText: candidate.event.definitionText,
             name: candidate.event.name,
             symbolKind: candidate.event.symbolKind,
         }) : null;
@@ -324,7 +332,15 @@ export class GAPDefinitionResolver {
         const symbolDefinitions = this.resolveSymbolDefinitions(document, position, name);
         if (symbolDefinitions.length > 0) return symbolDefinitions;
         const definition = this.resolveDefinition(document, position, name);
-        return definition ? [definition] : [];
+        if (definition) return [definition];
+        if (this.resolvingValueFields || !name.includes('.')) return [];
+        this.resolvingValueFields = true;
+        try {
+            return resolveValueFieldDefinitions(document, position, name,
+                (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName));
+        } finally {
+            this.resolvingValueFields = false;
+        }
     }
 
     private resolveSymbolDefinitions(
@@ -402,6 +418,7 @@ export class GAPDefinitionResolver {
                 column: candidate.event.column,
                 filePath: candidate.filePath,
                 headerText: candidate.event.headerText,
+                definitionText: candidate.event.definitionText,
                 name: candidate.event.name,
                 symbolKind: candidate.event.symbolKind,
             }));
@@ -610,6 +627,7 @@ export class GAPDefinitionResolver {
         column: number;
         filePath: string;
         headerText: string | null;
+        definitionText?: string;
         name: string;
         symbolKind: DefinitionSymbolKind;
     } | null {
@@ -617,7 +635,7 @@ export class GAPDefinitionResolver {
             const event = events[i];
             if (event.kind === 'def') {
                 if (names.has(event.name)) {
-                    return { lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, name: event.name, symbolKind: event.symbolKind };
+                    return { lines, row: event.row, column: event.column, filePath: currentFilePath, headerText: event.headerText, definitionText: event.definitionText, name: event.name, symbolKind: event.symbolKind };
                 }
             } else if (event.kind === 'read' && baseDir) {
                 const target = resolveReadTarget(event.pathText, baseDir);
@@ -640,6 +658,7 @@ export class GAPDefinitionResolver {
         column: number;
         filePath: string;
         headerText: string | null;
+        definitionText?: string;
         name: string;
         symbolKind?: DefinitionSymbolKind;
     }): ResolvedDefinition {
@@ -658,6 +677,7 @@ export class GAPDefinitionResolver {
         commentLines.reverse();
         return {
             definitionLine,
+            definitionText: start.definitionText,
             commentLines,
             filePath: start.filePath,
             row: start.row,
@@ -823,6 +843,7 @@ export class GAPDefinitionResolver {
                 row: node.startPosition.row,
                 column: node.startPosition.column,
                 headerText: this.functionHeaderText(node),
+                definitionText: definitionText(node),
                 symbolKind,
                 role: 'local',
             });
@@ -932,6 +953,7 @@ export class GAPDefinitionResolver {
                             row: nameNode.startPosition.row,
                             column: nameNode.startPosition.column,
                             headerText: null,
+                            definitionText: definitionText(node),
                             symbolKind,
                             role,
                         });

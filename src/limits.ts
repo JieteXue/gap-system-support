@@ -14,6 +14,12 @@ export const READ_FILE_CACHE_MAX_ENTRIES = 64;
 /** Hover document cache entries before the least recently used is evicted. */
 export const HOVER_DOCUMENT_CACHE_MAX_ENTRIES = 64;
 
+/** Maximum recursion depth while tracing returned record fields. */
+export const VALUE_ORIGIN_MAX_DEPTH = 48;
+
+/** Maximum expression visits per returned-field lookup. */
+export const VALUE_ORIGIN_MAX_STEPS = 1000;
+
 /** Parsed help descriptions retained for Hover. */
 export const HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES = 256;
 

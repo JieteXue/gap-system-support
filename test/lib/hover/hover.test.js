@@ -640,6 +640,51 @@ async function main() {
         fs.rmSync(tmp, { recursive: true, force: true });
     }
 
+    section('6b. Complete AST-delimited definitions');
+    {
+        const code = [
+            'fullFunction := function(x)',
+            '  if x then',
+            '    return rec(value := "end ) ;", nested := rec(flag := true));',
+            '  fi;',
+            '  return fail;',
+            'end;',
+            'neighbor := 999;',
+            'fullFunction(true);',
+            'FullRecord := rec(',
+            '  first := 1,',
+            '  nested := rec(',
+            '    second := 2',
+            '  )',
+            ');',
+            'FullRecord;',
+            'FullRecord.nested;',
+            'InstallGlobalFunction(InstalledFull, function(x)',
+            '  return x + 1;',
+            'end);',
+            'InstalledFull(2);',
+        ].join('\n');
+        const doc = makeDocument('complete-definitions.g', code, null);
+        const functionText = textOf(await hoverAt(provider, doc, 'fullFunction(true)'));
+        check('function hover preserves the body and its closing end', true,
+            functionText.includes('return fail;\nend;'));
+        check('quoted delimiters do not truncate the function', true,
+            functionText.includes('"end ) ;"'));
+        check('complete function excludes the neighboring definition', false,
+            functionText.includes('neighbor :='));
+        const recordText = textOf(await hoverAt(provider, doc, 'FullRecord;', 0));
+        check('record hover includes nested fields and the closing delimiter', true,
+            recordText.includes('second := 2\n  )\n);'));
+        const fieldText = textOf(await hoverAt(provider, doc, 'nested;', 0));
+        check('field hover includes the complete nested record', true,
+            fieldText.includes('nested := rec(\n    second := 2\n  )'));
+        check('nested field hover excludes sibling fields', false,
+            fieldText.includes('first :='));
+        const installationText = textOf(await hoverAt(provider, doc, 'InstalledFull(2)'));
+        check('installation hover preserves the entire function-bearing call', true,
+            installationText.includes('return x + 1;\nend);'));
+    }
+
     section('7. GAP functions win over user defined ones');
 
     {

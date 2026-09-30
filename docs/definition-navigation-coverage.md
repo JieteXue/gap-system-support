@@ -22,6 +22,22 @@ rules, caching, and verification, see
 - Complete-path matching, so `A.Print` and `B.Print` remain distinct
 - Calls through record and component selectors
 
+## Returned Record Fields
+
+- Fields of `result := Function(...)` when the function returns `rec(...)`
+- Multiple return paths, preserving each field's source location
+- Forwarding functions and parameters passed through wrappers
+- Nested fields reached through local assignments and returned records
+- List element origins from list literals, indexing, and `Add(list, value)`
+- Hover and Go to Definition share the same field origins; references can
+  connect the returned field to differently named result variables
+
+This is bounded source tracing, not GAP execution or complete type inference.
+List elements are treated as possible alternatives, not evaluated by index.
+Conditional mutations, arbitrary list transformations, closures, dynamically
+selected functions, and fields created only at runtime may remain unresolved.
+Field availability on every return path is not guaranteed.
+
 ## GAP Declaration APIs
 
 - Global functions, variables, names, and info classes

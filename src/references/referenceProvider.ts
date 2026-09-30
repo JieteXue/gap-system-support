@@ -167,7 +167,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                     const candidateNames = this.resolver.resolveLookupNames(
                         candidateDocument, candidatePosition, candidateName,
                     );
-                    if (candidateName !== lookupName &&
+                    if (!/[.!]/.test(lookupName) && candidateName !== lookupName &&
                         !candidateNames.some(name => targetNames.has(name))) continue;
                     const isAlias = candidateNames.some(name => name !== candidateName);
                     const localDefinition = isAlias ? null : this.resolver.resolveDefinition(

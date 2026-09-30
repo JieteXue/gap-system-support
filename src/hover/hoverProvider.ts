@@ -355,7 +355,7 @@ function customMarkdown(
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: ['gap.goToDefinition'] };
     md.appendMarkdown(`**${resolved.symbolType || 'symbol'}**\n\n`);
-    md.appendCodeblock(resolved.definitionLine, 'gap');
+    md.appendCodeblock(resolved.definitionText ?? resolved.definitionLine, 'gap');
     if (resolved.commentLines.length > 0) {
         // A separator between the code block and the comments.
         md.appendMarkdown('\n\n---\n\n');
@@ -449,6 +449,15 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         if (!resolved && (name.includes('.') || name.includes('!') ||
             selectorExpression(node).id !== node.id)) {
             resolved = this.resolver.resolveWorkspaceDefinition(document, name);
+        }
+        if (!resolved && name.includes('.')) {
+            const definitions = this.resolver.resolveDefinitions(document, position, name);
+            if (definitions.length > 0) {
+                return new vscode.Hover(definitions.map(definition => customMarkdown({
+                    ...definition,
+                    symbolType: 'record field',
+                })), this.rangeOf(document, node));
+            }
         }
         if (resolved) {
             return new vscode.Hover(

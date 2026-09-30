@@ -14,8 +14,11 @@ model used by the navigation features. The Hover category can be:
 - `parameter`
 - `record field`
 
-The displayed definition line and directly preceding `##` comments are included
-when a definition is available. Qualified record and component paths such as
+The complete source definition and directly preceding `##` comments are included
+when a definition is available. Definitions are delimited by the syntax tree:
+function bodies through `end`, full `rec(...)` values, multiline expressions,
+and declaration/installation calls are preserved. Neighboring definitions are
+not included. Qualified record and component paths such as
 `A.B` and `A!.B` are kept intact.
 
 The category is a static symbol category, not a runtime GAP type. For example,
