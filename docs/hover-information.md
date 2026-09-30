@@ -15,6 +15,10 @@ cursor is elsewhere; subsequent cursor moves resume normal following.
 
 The pane uses the same static resolver as native Hover. Complete definitions
 retain their original whitespace and receive Tree-sitter syntax highlighting.
+The code gutter shows original source line numbers and stays visible while
+scrolling horizontally. Two-column indentation guides continue through blank
+lines within the same indentation. Selecting and copying code excludes the
+gutter and preserves its original source text and line endings.
 It also shows comments, category, and a source link. Multiple possible origins
 have a chooser; built-ins show their signature/help summary and link to GAP Help.
 Click a highlighted identifier to go to its definition (Enter works with

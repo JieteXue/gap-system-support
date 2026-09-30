@@ -100,6 +100,15 @@
         const code = document.createElement('pre');
         code.className = 'code';
         code.setAttribute('aria-label', 'Source definition');
+        code.addEventListener('copy', event => {
+            const selection = window.getSelection();
+            if (!event.clipboardData || !selection?.rangeCount) return;
+            const range = selection.getRangeAt(0);
+            if (!code.contains(range.startContainer) || !code.contains(range.endContainer)) return;
+            // Block layout adds visual line breaks; copy the original source text nodes.
+            event.clipboardData.setData('text/plain', range.cloneContents().textContent);
+            event.preventDefault();
+        });
         const comments = document.createElement('div');
         comments.className = 'comments';
         function choose(index) {
@@ -114,13 +123,46 @@
             source.title = preview.builtin ? 'Open GAP Help' : 'Open source';
             source.setAttribute('aria-label', source.title);
             code.replaceChildren();
-            let offset = 0;
-            for (const token of preview.tokens) {
-                if (token.start < offset || token.end < token.start || token.end > preview.text.length) continue;
-                code.appendChild(document.createTextNode(preview.text.slice(offset, token.start)));
+            const lines = GAPDefinitionLines.layout(preview);
+            code.dataset.digits = String(String(lines.at(-1).number).length);
+            for (const line of lines) {
+                const row = document.createElement('span');
+                row.className = 'code-line';
+                const number = document.createElement('span');
+                number.className = 'line-number';
+                number.dataset.line = String(line.number);
+                number.setAttribute('aria-hidden', 'true');
+                const content = document.createElement('span');
+                content.className = 'line-content';
+                const guides = document.createElement('span');
+                guides.className = 'indent-guides';
+                guides.setAttribute('aria-hidden', 'true');
+                for (let level = 0; level < line.guides; level++) {
+                    const guide = document.createElement('span');
+                    guide.className = 'indent-guide';
+                    guides.appendChild(guide);
+                }
+                content.appendChild(guides);
+                for (const segment of line.segments) appendSegment(content, segment, preview);
+                row.append(number, content);
+                code.appendChild(row);
+                if (line.ending) {
+                    const ending = document.createElement('span');
+                    ending.className = 'line-ending';
+                    ending.textContent = line.ending;
+                    code.appendChild(ending);
+                }
+            }
+            code.scrollLeft = scrollLeft;
+            comments.textContent = preview.comments.join('\n');
+            comments.hidden = !preview.comments.length;
+        }
+        function appendSegment(content, segment, preview) {
+            const token = segment.token;
+            if (token) {
                 const span = document.createElement('span');
                 span.className = `syntax-${token.kind}`;
-                span.textContent = preview.text.slice(token.start, token.end);
+                span.textContent = segment.text;
                 if (token.name && !preview.builtin) {
                     span.classList.add('symbol');
                     span.tabIndex = 0;
@@ -133,13 +175,8 @@
                         if (event.key === 'Enter') { event.preventDefault(); navigate(); }
                     });
                 }
-                code.appendChild(span);
-                offset = token.end;
-            }
-            code.appendChild(document.createTextNode(preview.text.slice(offset)));
-            code.scrollLeft = scrollLeft;
-            comments.textContent = preview.comments.join('\n');
-            comments.hidden = !preview.comments.length;
+                content.appendChild(span);
+            } else content.appendChild(document.createTextNode(segment.text));
         }
         if (previews.length > 1) {
             const choices = document.createElement('select');

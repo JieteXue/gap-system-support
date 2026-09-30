@@ -33,6 +33,8 @@ export interface DefinitionPreview {
     sourceLabel: string;
     row: number;
     column: number;
+    /** First displayed source line, which can precede the definition name. */
+    startRow: number;
     builtin?: string;
     document: vscode.TextDocument;
     sourceText: string;
@@ -106,6 +108,7 @@ export class DefinitionPreviewService {
                 comments: help?.description ? [help.description] : [], tokens,
                 uri: document.uri.toString(), sourceLabel: 'GAP Help', row: position.line,
                 column: position.character, builtin: info.name,
+                startRow: 0,
                 document, sourceText: text, revision: this.resolver.revision,
             }];
         } else {
@@ -137,6 +140,7 @@ export class DefinitionPreviewService {
             comments: definition.commentLines, tokens,
             uri: document.uri.toString(), sourceLabel: path.basename(document.uri.fsPath) || 'Untitled',
             row: definition.row, column: definition.column, document, sourceText,
+            startRow: tree.rootNode.descendantForIndex(excerpt.start).startPosition.row,
             revision: this.resolver.revision,
         };
     }

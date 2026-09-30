@@ -27,6 +27,7 @@ export function inspectionHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 <button id="refresh" title="Refresh current position" aria-label="Refresh current position"><i class="codicon codicon-refresh"></i></button>
 </nav></header>
 <main id="root" aria-live="polite"><p class="state">No static definition found.</p></main>
+<script nonce="${nonce}" src="${escape(resource('webresources', 'definition-lines.js'))}"></script>
 <script nonce="${nonce}" src="${escape(resource('webresources', 'definition-inspector.js'))}"></script>
 </body></html>`;
 }

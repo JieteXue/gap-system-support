@@ -51,14 +51,52 @@ select {
     min-width: 0;
 }
 .code {
+    --gutter-width: 4ch;
+    display: flex;
+    flex-direction: column;
     font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
     font-size: var(--vscode-editor-font-size, 13px);
     line-height: 1.65;
     tab-size: 2;
     margin: 0;
-    white-space: pre;
+    white-space: normal;
     overflow: auto;
-    padding: 3px 2px 8px;
+    padding: 3px 0 8px;
+}
+.code[data-digits="1"], .code[data-digits="2"] { --gutter-width: 3ch; }
+.code[data-digits="4"] { --gutter-width: 5ch; }
+.code[data-digits="5"] { --gutter-width: 6ch; }
+.code[data-digits="6"] { --gutter-width: 7ch; }
+.code[data-digits="7"] { --gutter-width: 8ch; }
+.code-line { display: flex; width: max-content; min-width: 100%; min-height: 1.65em; }
+.line-number {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    flex: 0 0 var(--gutter-width);
+    width: var(--gutter-width);
+    padding-right: 1ch;
+    text-align: right;
+    white-space: pre;
+    user-select: none;
+    color: var(--vscode-editorLineNumber-foreground, #858585);
+    background: var(--vscode-editor-background, #fff);
+}
+.line-number::before { content: attr(data-line); }
+.line-content { position: relative; white-space: pre; min-height: 1.65em; }
+.line-ending { display: none; }
+.indent-guides {
+    position: absolute;
+    inset: 0 auto 0 0;
+    display: flex;
+    pointer-events: none;
+    user-select: none;
+}
+.indent-guide {
+    width: 2ch;
+    flex: 0 0 2ch;
+    border-left: 1px solid var(--vscode-editorIndentGuide-background1,
+        var(--vscode-editorIndentGuide-background, #b8b8b855));
 }
 .comments {
     border-top: 1px solid var(--vscode-panel-border, #d6d6d6);

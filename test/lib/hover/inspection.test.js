@@ -130,6 +130,8 @@ async function main() {
         'BindGlobal("Installed", function(x)',
         '  return counter + x;',
         'end);',
+        'BindGlobal(',
+        '  "MultilineInstalled", function() return counter; end);',
     ].join('\r\n'));
     const usage = document('usage.g', [
         'Read("library.g");',
@@ -140,6 +142,7 @@ async function main() {
         'Factory(true);',
         'Installed(1);',
         'IsBound(counter);',
+        'MultilineInstalled();',
     ].join('\n'));
     const resolver = new GAPDefinitionResolver(query);
     const hover = new GAPHoverProvider(query, resolver);
@@ -150,6 +153,7 @@ async function main() {
     check('full function body and delimiters are preserved', true, previews[0].text.endsWith('end;'));
     check('neighboring definition is excluded', false, previews[0].text.includes('neighbor'));
     check('original CRLF source is preserved', true, previews[0].text.includes('\r\n'));
+    check('excerpt line numbering starts at the real source row', 2, previews[0].startRow);
     check('read-chain origin is the producing source file', library.uri.toString(), previews[0].uri);
     const item = symbol(previews[0], 'leaf');
     check('token uses the actual source row', 3, item.row);
@@ -161,6 +165,9 @@ async function main() {
         service.at(usage, at(usage, 'Middle.Make'))[0].text.startsWith('Middle := rec'));
     check('installation preview preserves the full call', true,
         service.at(usage, at(usage, 'Installed(1)'))[0].text.endsWith('end);'));
+    const multilineInstall = service.at(usage, at(usage, 'MultilineInstalled()'))[0];
+    check('multiline installation preview starts before its declared name', 11, multilineInstall.startRow);
+    check('multiline installation definition name retains its separate source location', 12, multilineInstall.row);
     check('builtins retain precedence and have a help action', 'IsBound',
         service.at(usage, at(usage, 'IsBound(counter)'))[0].builtin);
     check('builtin signatures also receive syntax highlighting', true,
