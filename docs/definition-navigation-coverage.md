@@ -22,6 +22,37 @@ rules, caching, and verification, see
 - Complete-path matching, so `A.Print` and `B.Print` remain distinct
 - Calls through record and component selectors
 
+## Global Aliases
+
+- Identifier and qualified-record targets such as `ME := MagneticEquivalence`
+  and `Compare := MagneticEquivalence.Compare`
+- Chained global aliases and bindings imported by literal `Read()` calls
+- Cursor-sensitive alias assignments: a later binding does not change an
+  earlier occurrence
+- Qualified uses whose root is renamed, without merging unrelated paths
+- Reverse references from canonical definitions to uses through aliases
+
+Alias normalization covers syntactically recognizable global assignments.
+It is not general scope-sensitive alias analysis: local aliases, computed
+selectors, conditional execution, and runtime rebinding are not fully modeled.
+Circular alias chains terminate without executing GAP.
+
+## Returned Record Fields
+
+- Fields of `result := Function(...)` when the function returns `rec(...)`
+- Multiple return paths, preserving each field's source location
+- Forwarding functions and parameters passed through wrappers
+- Nested fields reached through local assignments and returned records
+- List element origins from list literals, indexing, and `Add(list, value)`
+- Hover and Go to Definition share the same field origins; references can
+  connect the returned field to differently named result variables
+
+This is bounded source tracing, not GAP execution or complete type inference.
+List elements are treated as possible alternatives, not evaluated by index.
+Conditional mutations, arbitrary list transformations, closures, dynamically
+selected functions, and fields created only at runtime may remain unresolved.
+Field availability on every return path is not guaranteed.
+
 ## GAP Declaration APIs
 
 - Global functions, variables, names, and info classes

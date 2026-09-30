@@ -4,6 +4,39 @@ The extension provides lightweight static information when the pointer rests on
 a GAP token. It does not execute GAP code and does not infer the runtime type
 of a value.
 
+## Aliases And Returned Fields
+
+Suppose a workspace source file defines `MagneticEquivalence.Compare` as a
+record containing `IntegralTimeAxes`. A caller can use a global alias:
+
+```gap
+Read("gap/magnetic/api.g");
+ME := MagneticEquivalence;
+result := ME.Compare.IntegralTimeAxes(G, H);;
+result.equivalent;
+result.representation1.spatialGroup;
+```
+
+Hover on `ME`, `Compare`, and `IntegralTimeAxes` resolves the selected segment:
+the original root record, the nested record, and the function respectively.
+Hover on a selector's dot targets the following field. Go to Definition uses
+the same origins, and Find All References on a canonical definition can find
+uses through the renamed root.
+
+If the function returns statically traceable records, Hover on `equivalent`,
+`representation1`, or `spatialGroup` shows that field's producing definition.
+Tracing can follow wrapper returns, passed parameters, local assignments,
+and list elements inserted with `Add`. Multiple return paths may produce
+multiple field definitions; no claim is made that every path has the field.
+
+Source delimiters determine the displayed definition, not a one-line preview
+or a search for the next `end` in the text. Hover preserves nested bodies and
+quoted delimiters, while a record field excludes adjacent fields.
+
+These are bounded static source relationships, not inferred runtime types.
+For supported constructs and unresolved cases, see
+[Definition Navigation Coverage](definition-navigation-coverage.md).
+
 ## Symbol Categories
 
 User-defined symbols are resolved using the same lexical and `Read()`-aware
@@ -14,8 +47,11 @@ model used by the navigation features. The Hover category can be:
 - `parameter`
 - `record field`
 
-The displayed definition line and directly preceding `##` comments are included
-when a definition is available. Qualified record and component paths such as
+The complete source definition and directly preceding `##` comments are included
+when a definition is available. Definitions are delimited by the syntax tree:
+function bodies through `end`, full `rec(...)` values, multiline expressions,
+and declaration/installation calls are preserved. Neighboring definitions are
+not included. Qualified record and component paths such as
 `A.B` and `A!.B` are kept intact.
 
 The category is a static symbol category, not a runtime GAP type. For example,
@@ -82,9 +118,12 @@ workspace lookup if the future `Read` path is dynamic. This allows the
 `MagneticEquivalence` symbol to show its definition in another workspace file
 without changing normal definition resolution rules for ordinary references.
 
-The fallback is intentionally limited to the `IsBound(...)` guard. Arbitrary
-dynamic loading, generated names, `EvalString`, and values supplied only by a
-runtime-installed package cannot be resolved reliably without running GAP.
+The guard is one use of workspace fallback. Qualified record/component symbols
+and alias targets can also resolve through the workspace symbol index when a
+literal `Read` chain is unavailable. Finding a candidate does not prove that a
+computed loader executes that file. Arbitrary dynamic loading, generated names,
+`EvalString`, and values supplied only by a runtime-installed package cannot be
+resolved reliably without running GAP.
 
 ## Performance
 
@@ -92,8 +131,12 @@ Hover requests use:
 
 - a lazily built index of help entries by normalized function name;
 - an LRU cache for extracted documentation summaries;
-- the existing parsed-document and read-file caches;
-- a short-lived workspace symbol cache for cross-file lookups.
+- document models and read-file caches shared with definition/reference navigation;
+- one short-lived symbol index per workspace and cursor-sensitive alias histories;
+- request-local indexes and memoized lookups while tracing returned fields.
 
 This keeps pointer movement from repeatedly scanning the complete help index or
 reparsing the same source files.
+
+See [Navigation Performance](navigation.md#performance) for cache invalidation,
+capacity limits, and syntax-tree lifetime handling.

@@ -11,6 +11,7 @@ import { GAPDiagnosticsProvider } from './diagnostics/diagnosticsProvider';
 import { ensureData, generateData, resetData } from './completion/dataManager';
 import { GAPCompletionProvider } from './completion/completionProvider';
 import { GAPHoverProvider } from './hover/hoverProvider';
+import { GAPDefinitionResolver } from './hover/definitionResolver';
 import { GAPDefinitionProvider } from './definition/definitionProvider';
 import { GAPReferenceProvider } from './references/referenceProvider';
 import { toShellPath, resolveHelpPath } from './path';
@@ -274,7 +275,13 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // Register the hover provider.
-    const hoverProvider = new GAPHoverProvider(completionPath);
+    const definitionResolver = new GAPDefinitionResolver(completionPath);
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
+        if (event.document.languageId === 'gap' && event.contentChanges.length > 0) {
+            definitionResolver.onWorkspaceFilesChanged();
+        }
+    }));
+    const hoverProvider = new GAPHoverProvider(completionPath, definitionResolver);
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(
             { language: 'gap' },
@@ -284,7 +291,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Register references so VS Code can show Find All References and the
     // inline Peek References editor.
-    const referenceProvider = new GAPReferenceProvider(completionPath);
+    const referenceProvider = new GAPReferenceProvider(completionPath, definitionResolver);
     context.subscriptions.push(
         vscode.languages.registerReferenceProvider(
             { language: 'gap' },
@@ -297,6 +304,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const definitionProvider = new GAPDefinitionProvider(
         completionPath,
         referenceProvider,
+        definitionResolver,
     );
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(
@@ -323,23 +331,15 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(() => {
-            hoverProvider.onWorkspaceFilesChanged();
-            definitionProvider.onWorkspaceFilesChanged();
             referenceProvider.onWorkspaceFilesChanged();
         }),
         vscode.workspace.onDidCreateFiles(() => {
-            hoverProvider.onWorkspaceFilesChanged();
-            definitionProvider.onWorkspaceFilesChanged();
             referenceProvider.onWorkspaceFilesChanged();
         }),
         vscode.workspace.onDidDeleteFiles(() => {
-            hoverProvider.onWorkspaceFilesChanged();
-            definitionProvider.onWorkspaceFilesChanged();
             referenceProvider.onWorkspaceFilesChanged();
         }),
         vscode.workspace.onDidRenameFiles(() => {
-            hoverProvider.onWorkspaceFilesChanged();
-            definitionProvider.onWorkspaceFilesChanged();
             referenceProvider.onWorkspaceFilesChanged();
         }),
     );
@@ -358,8 +358,6 @@ export async function activate(context: vscode.ExtensionContext) {
             onDocumentClosed(doc.uri);
             semanticProvider.onDocumentClosed(doc.uri);
             completionProvider.onDocumentClosed(doc.uri);
-            hoverProvider.onDocumentClosed(doc.uri);
-            definitionProvider.onDocumentClosed(doc.uri);
             referenceProvider.onDocumentClosed(doc.uri);
             diagnosticsProvider.onDocumentClosed(doc.uri);
         }),

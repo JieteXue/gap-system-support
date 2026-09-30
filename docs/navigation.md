@@ -42,6 +42,25 @@ files.
 Workspace fallback is intentionally static. It does not execute package
 initialization, evaluate computed names, or reproduce runtime method dispatch.
 
+## Aliases And Result Fields
+
+Global aliases such as `ME := MagneticEquivalence` preserve the canonical
+definition identity for navigation. In `ME.Compare.IntegralTimeAxes(...)`,
+each segment resolves separately; selecting `Compare` does not select the
+final function. References from the canonical record or field can include uses
+through `ME`, even though their source spelling differs.
+
+For `result := ME.Compare.IntegralTimeAxes(G, H)`, fields such as
+`result.equivalent` and `result.representation1.spatialGroup` can navigate to
+their source record entries when the return values are statically traceable.
+Forwarding calls, parameter bindings, local assignments, and possible list
+elements are followed within fixed recursion and work budgets. Multiple return
+paths can yield several candidate definitions. This is not runtime type
+inference and does not guarantee a field exists on every path.
+
+See [Hover Information](hover-information.md) for a complete example and the
+syntax-delimited definition display.
+
 ## Peek And Reference Rules
 
 Reference collection uses the same symbol classifier as definition navigation:
@@ -55,10 +74,31 @@ Reference collection uses the same symbol classifier as definition navigation:
 
 ## Performance
 
-Workspace file discovery and parsed symbol indexes are cached and invalidated
-when relevant workspace files change. Repeated definition, reference, and Hover
-requests reuse document trees, file events, and short-lived workspace lookup
-caches instead of rescanning the workspace on every request.
+Hover, definition, and reference providers share one definition resolver.
+Each document model contains source lines, line offsets, scalar definition
+events, and lexical scope offsets. Unchanged models remain reusable even when
+the parser evicts and recreates their native syntax trees.
+
+Workspace fallback builds one symbol index per workspace, not one scan per
+symbol name. Indexes expire after five seconds and are invalidated on text
+edits, saves, file creation/deletion/renaming, and document closure. Current-file
+exclusion happens at lookup time so the same index serves different documents.
+Global alias bindings are indexed as cursor-sensitive histories, including
+bindings imported by literal `Read` calls.
+
+Reference indexes retain immutable names and positions instead of native
+syntax nodes, and qualified references are indexed by their leaf name before
+checking definition identity. Document and workspace indexes use bounded LRU
+caches. Disk files are checked by modification time and size; unchanged cache
+entries need neither another content read nor another parse. Open document
+versions take priority over disk signatures.
+
+Return-value tracing uses the shared source loader, request-local scope and
+record-field indexes, and memoized definition lookups. It temporarily copies
+syntax trees to keep recursive cross-file nodes valid during parser eviction
+and releases those copies when the request ends. Providers retain scalar
+cursor context before resolution so their ranges do not depend on an evicted
+tree.
 
 Limits in `src/limits.ts` bound document size, cache sizes, and scanned content.
 When a limit is reached, the provider returns no static result rather than
@@ -75,7 +115,9 @@ The automated suite covers:
 - nested `rec(...)` fields and dotted/component paths;
 - Peek behavior with and without references;
 - reference exclusion rules and workspace cache reuse;
-- Hover resolution that shares the definition model.
+- Hover resolution that shares the definition model;
+- cache invalidation for unsaved edits, new/deleted files, closure, and expiry;
+- shared parsing and workspace scans, and tracing beyond the parser cache size.
 
 Run the complete suite with:
 
@@ -85,3 +127,13 @@ npm test
 
 For manual VS Code testing, build a VSIX with
 `npx @vscode/vsce package` or launch an Extension Development Host with `F5`.
+To launch without attaching a debugger, run the VS Code CLI from the repository:
+
+```bash
+code --new-window --extensionDevelopmentPath="$PWD" /absolute/path/to/gap-workspace
+```
+
+Run `npm run compile` after source changes, then use
+**Developer: Reload Window** in the Extension Development Host. Automated
+provider tests do not replace testing Hover, clicks, and Peek in the actual
+VS Code extension.
