@@ -115,7 +115,7 @@ The cursor-following right-hand definition pane is described in
 [Hover Information](hover-information.md#definition-panel). It shares the
 native Hover resolver and syntax queries; it does not implement recursive
 tooltips. The revised implementation design is recorded in
-[Definition Panel Design](recursive-hover-plan.md).
+[Definition Panel Design](definition-panel.md).
 
 The automated suite covers:
 

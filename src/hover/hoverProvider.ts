@@ -7,7 +7,6 @@ import { GAPDefinitionResolver, ResolvedDefinition } from './definitionResolver'
 import { definitionPathLink } from './format';
 import { getHelpState } from '../help/helpData';
 import type { HelpEntry } from '../help/indexData';
-import { simpleString } from '../help/simpleString';
 import { functionNameNodeAt, symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
 import { resolveHelpPath } from '../path';
 import { BUILTIN_FUNCTION_NAMES } from '../completion/builtinNames';
@@ -258,18 +257,17 @@ function getFunctionHelpCandidates(name: string): HelpEntry[] {
         const nextIndex = new Map<string, HelpEntry[]>();
         for (const entry of entries) {
             if (entry.type !== 'F' && !entry.display) continue;
-            const keys = new Set([entry.key, simpleString(entry.display)]);
-            for (const key of keys) {
-                if (!key) continue;
-                const bucket = nextIndex.get(key);
-                if (bucket) bucket.push(entry);
-                else nextIndex.set(key, [entry]);
-            }
+            // Help search keys are case-folded; code symbols must retain their spelling.
+            const name = /^([A-Za-z_][A-Za-z0-9_]*)(?:$|\s*\()/.exec(entry.display)?.[1];
+            if (!name || (entry.type !== 'F' && entry.display !== name)) continue;
+            const bucket = nextIndex.get(name);
+            if (bucket) bucket.push(entry);
+            else nextIndex.set(name, [entry]);
         }
         indexedHelpEntries = entries;
         functionHelpIndex = nextIndex;
     }
-    return functionHelpIndex.get(simpleString(name)) ?? [];
+    return functionHelpIndex.get(name) ?? [];
 }
 
 function findBuiltinHelp(name: string): BuiltinHelp | undefined {

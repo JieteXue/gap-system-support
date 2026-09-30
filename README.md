@@ -23,6 +23,11 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
 - **Documentation viewer**: search results are displayed in a webview panel.
 - **Language model tools**: GAP help lookup and syntax checking tools that agents can automatically invoke in chat.
 
+See [Hover Information](docs/hover-information.md) and
+[Definition Panel Design](docs/definition-panel.md) for details, limits, and a
+VS Code acceptance checklist. Code symbol matching is case-sensitive (`group`
+is not `Group`).
+
 ## Getting Started
 
 ### 1. Install GAP and Configure the PATH

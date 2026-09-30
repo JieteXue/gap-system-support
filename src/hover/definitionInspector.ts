@@ -54,7 +54,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
     private following = true;
     private busy = false;
     private epoch = 0;
-    private readonly session = randomUUID();
+    private session = randomUUID();
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -93,6 +93,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
 
     private ensurePanel(): void {
         if (this.panel) return;
+        this.session = randomUUID();
         this.panel = vscode.window.createWebviewPanel(
             'gapDefinitionInspection', 'GAP Info',
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
@@ -108,7 +109,8 @@ export class GAPDefinitionInspector implements vscode.Disposable {
                 tryLog(() => this.receive(message), '[GAP] Invalid definition panel message')),
             this.panel.onDidDispose(() => {
                 this.panel = undefined;
-                clearTimeout(this.timer);
+                this.cancelTimer();
+                this.epoch++;
                 this.previews = [];
                 this.editor = undefined;
                 this.info = undefined;
@@ -147,7 +149,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
     }
 
     private schedule(): void {
-        clearTimeout(this.timer);
+        this.cancelTimer();
         this.epoch++;
         this.busy = true;
         this.post('loading');
@@ -168,8 +170,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
     }
 
     private update(document: vscode.TextDocument, position: vscode.Position): void {
-        clearTimeout(this.timer);
-        this.timer = undefined;
+        this.cancelTimer();
         this.epoch++;
         this.busy = false;
         this.origin = { document, position, text: document.getText(), revision: this.resolver.revision };
@@ -202,8 +203,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
         if (input.session !== this.session || input.epoch !== this.epoch) return;
         if (input.type === 'follow' && typeof input.value === 'boolean') {
             this.following = input.value;
-            clearTimeout(this.timer);
-            this.timer = undefined;
+            this.cancelTimer();
             this.busy = false;
             if (this.following) this.refresh();
             else this.post(this.origin && !this.originFresh() ? 'stale' :
@@ -222,7 +222,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
                 if (!item) return;
                 position = new vscode.Position(item.row, item.column);
             }
-            this.openSource(this.origin.document.uri, position);
+            this.openSource(this.origin.document.uri, position, () => this.originFresh());
             return;
         }
         if (input.type === 'references') {
@@ -260,20 +260,27 @@ export class GAPDefinitionInspector implements vscode.Disposable {
                     })), { placeHolder: 'Definition origin' }))?.candidate;
                 if (!chosen || this.epoch !== epoch || !this.panel || !this.service.isFresh(chosen)) return;
                 if (chosen.builtin) void vscode.commands.executeCommand('gap.searchHelpTerm', chosen.builtin);
-                else this.openSource(chosen.document.uri, new vscode.Position(chosen.row, chosen.column));
+                else this.openSource(chosen.document.uri, new vscode.Position(chosen.row, chosen.column),
+                    () => this.service.isFresh(chosen));
             }, error => console.error('[GAP] Open symbol failed', error));
         } else {
             if (input.type !== 'source') return;
-            this.openSource(preview.document.uri, new vscode.Position(preview.row, preview.column));
+            this.openSource(preview.document.uri, new vscode.Position(preview.row, preview.column),
+                () => this.service.isFresh(preview));
         }
     }
 
-    private openSource(uri: vscode.Uri, position: vscode.Position): void {
+    private openSource(uri: vscode.Uri, position: vscode.Position, fresh: () => boolean): void {
+        const epoch = this.epoch;
+        const current = () => !!this.panel && this.epoch === epoch && fresh();
         void tryValueAsync(async () => {
             const document = await vscode.workspace.openTextDocument(uri);
+            if (!current()) return;
             const editor = await vscode.window.showTextDocument(document, {
                 viewColumn: this.editor?.viewColumn ?? vscode.ViewColumn.One,
+                selection: new vscode.Range(position, position),
             });
+            if (!current()) return;
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
         }, error => console.error('[GAP] Open information source failed', error));
@@ -297,8 +304,10 @@ export class GAPDefinitionInspector implements vscode.Disposable {
         if (this.editor) this.update(this.editor.document, this.editor.selection.active);
         else if (this.originFresh()) this.update(this.origin!.document, this.origin!.position);
         else {
+            this.cancelTimer();
             this.previews = [];
             this.info = undefined;
+            this.origin = undefined;
             this.busy = false;
             this.epoch++;
             this.post('empty');
@@ -311,8 +320,7 @@ export class GAPDefinitionInspector implements vscode.Disposable {
         if (this.panel) {
             if (this.following) this.schedule();
             else {
-                clearTimeout(this.timer);
-                this.timer = undefined;
+                this.cancelTimer();
                 this.epoch++;
                 this.busy = false;
                 this.post('stale');
@@ -321,10 +329,15 @@ export class GAPDefinitionInspector implements vscode.Disposable {
     }
 
     dispose(): void {
-        clearTimeout(this.timer);
+        this.cancelTimer();
         this.panel?.dispose();
         for (const subscription of this.subscriptions) subscription.dispose();
         this.service.dispose();
         this.tickets.clear();
+    }
+
+    private cancelTimer(): void {
+        clearTimeout(this.timer);
+        this.timer = undefined;
     }
 }

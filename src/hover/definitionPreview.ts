@@ -52,6 +52,9 @@ export class DefinitionPreviewService {
     private readonly cache = new LruCache<string, {
         text: string; expiresAt: number; previews: DefinitionPreview[];
     }>({ maxEntries: INSPECTION_CACHE_MAX_ENTRIES });
+    private readonly definitions = new LruCache<string, DefinitionPreview>({
+        maxEntries: INSPECTION_CACHE_MAX_ENTRIES,
+    });
 
     constructor(
         private readonly resolver: GAPDefinitionResolver,
@@ -63,6 +66,7 @@ export class DefinitionPreviewService {
 
     clear(): void {
         this.cache.clear();
+        this.definitions.clear();
     }
 
     dispose(): void {
@@ -129,13 +133,19 @@ export class DefinitionPreviewService {
         if (!document) return null;
         const sourceText = document.getText();
         if (sourceText.length > READ_CONTENT_LIMIT) return null;
+        const key = `${document.uri.toString()}:${document.version}:${definition.row}:${definition.column}:${this.resolver.revision}`;
+        const cached = this.definitions.peek(key);
+        if (cached?.sourceText === sourceText) {
+            this.definitions.touch(key, cached);
+            return { ...cached, title: title ?? cached.title, category, comments: definition.commentLines };
+        }
         const tree = getDocumentTree(document, sourceText);
         const node = tree.rootNode.descendantForIndex(document.offsetAt(
             new vscode.Position(definition.row, definition.column)));
         const excerpt = definitionExcerpt(node);
         const tokens = this.highlightTokens(tree, excerpt.start, excerpt.end);
-        return {
-            title: title ?? symbolLookupName(node), category,
+        const preview: DefinitionPreview = {
+            title: symbolLookupName(node), category,
             text: sourceText.slice(excerpt.start, excerpt.end),
             comments: definition.commentLines, tokens,
             uri: document.uri.toString(), sourceLabel: path.basename(document.uri.fsPath) || 'Untitled',
@@ -143,6 +153,8 @@ export class DefinitionPreviewService {
             startRow: tree.rootNode.descendantForIndex(excerpt.start).startPosition.row,
             revision: this.resolver.revision,
         };
+        this.definitions.set(key, preview);
+        return { ...preview, title: title ?? preview.title };
     }
 
     private highlightTokens(tree: Tree, start: number, end: number): PreviewToken[] {

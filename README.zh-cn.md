@@ -23,6 +23,10 @@
 - **帮助文档浏览**：搜索结果会在 Webview 面板中展示。
 - **语言模型工具**：为对话中的 agents 提供 GAP 帮助查询与语法检查工具。
 
+详细行为、限制和 VS Code 实测清单见
+[Hover 信息](docs/hover-information.md)与[信息栏设计](docs/definition-panel.md)。
+代码符号严格区分大小写，`group` 不会被当作内置函数 `Group`。
+
 ## 快速开始
 
 ### 1. 安装 GAP 并配置 PATH

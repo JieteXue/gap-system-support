@@ -145,6 +145,11 @@ Built-in functions are recognized from three sources:
    ordinary global-function enumeration.
 3. The GAP help index.
 
+Code identifiers are matched case-sensitively: `group`, `Group`, and `GROUP` are
+different names. Help search normalization is never used to classify code
+symbols. Help entries with signatures retain the original identifier spelling;
+documentation search itself still supports its usual normalized queries.
+
 Their Hover contains the function name, a short documentation paragraph when
 the matching help file is available, the help book, and a command link to the
 full GAP Help entry. The `gap.docPath` and `gap.pkgPath` settings are needed
@@ -206,7 +211,7 @@ resolved reliably without running GAP.
 
 Hover requests use:
 
-- a lazily built index of help entries by normalized function name;
+- a lazily built index of help entries by exact-case function name;
 - an LRU cache for extracted documentation summaries;
 - document models and read-file caches shared with definition/reference navigation;
 - one short-lived symbol index per workspace and cursor-sensitive alias histories;
@@ -214,6 +219,11 @@ Hover requests use:
 
 This keeps pointer movement from repeatedly scanning the complete help index or
 reparsing the same source files.
+
+The information pane also shares a bounded cache of definition excerpts and
+highlight tokens across occurrences and aliases. See
+[Definition Panel Design](definition-panel.md) for architecture, lifecycle,
+limits, and the VS Code acceptance checklist.
 
 See [Navigation Performance](navigation.md#performance) for cache invalidation,
 capacity limits, and syntax-tree lifetime handling.

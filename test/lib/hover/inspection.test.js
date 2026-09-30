@@ -143,6 +143,8 @@ async function main() {
         'Installed(1);',
         'IsBound(counter);',
         'MultilineInstalled();',
+        'Alias := Factory;',
+        'Alias(true);',
     ].join('\n'));
     const resolver = new GAPDefinitionResolver(query);
     const hover = new GAPHoverProvider(query, resolver);
@@ -161,6 +163,14 @@ async function main() {
         previews[0].text.slice(item.start, item.end));
     check('repeat preview reuses the immutable cached value', true,
         service.at(usage, at(usage, 'Factory(true)')) === previews);
+    const interior = at(usage, 'Factory(true)');
+    interior.character++;
+    check('different cursor offsets reuse the definition highlight tokens', true,
+        service.at(usage, interior)[0].tokens === previews[0].tokens);
+    check('aliases reuse source tokens but retain their own titles', 'Alias',
+        service.at(usage, at(usage, 'Alias(true)'))[0].title);
+    check('aliases share highlight results with their actual source definition', true,
+        service.at(usage, at(usage, 'Alias(true)'))[0].tokens === previews[0].tokens);
     check('nested alias segment uses its own record definition', true,
         service.at(usage, at(usage, 'Middle.Make'))[0].text.startsWith('Middle := rec'));
     check('installation preview preserves the full call', true,
@@ -319,6 +329,25 @@ async function main() {
         const current = panel.messages.at(-1);
         panel.receive({ type, session: current.session, epoch: current.epoch, ...extra });
     };
+    let finishOpen;
+    const openTextDocument = vscodeMock.workspace.openTextDocument;
+    vscodeMock.workspace.openTextDocument = () => new Promise(resolve => { finishOpen = resolve; });
+    openedSource = undefined;
+    send('source', { index: 0 });
+    selectionChanged({ textEditor: editor });
+    finishOpen(library);
+    await new Promise(resolve => setImmediate(resolve));
+    check('obsolete asynchronous source requests cannot open another editor', undefined, openedSource);
+    vscodeMock.workspace.openTextDocument = openTextDocument;
+    await wait();
+    vscodeMock.workspace.openTextDocument = () => new Promise(resolve => { finishOpen = resolve; });
+    send('source', { index: 0 });
+    library.replace(library.getText().replace('counter := 300;', 'counter := 301;'));
+    finishOpen(library);
+    await new Promise(resolve => setImmediate(resolve));
+    check('source edits during asynchronous loading reject old offsets', undefined, openedSource);
+    library.replace(library.getText().replace('counter := 301;', 'counter := 300;'));
+    vscodeMock.workspace.openTextDocument = openTextDocument;
     send('follow', { value: false });
     const paused = panel.messages.at(-1);
     editor.selection.active = at(library, 'Factory :=');
@@ -394,6 +423,15 @@ async function main() {
     const invalidatedCount = panel.messages.length;
     await commands.get('gap.inspectDefinition')(ticket);
     check('invalidated native tickets cannot reopen old source offsets', invalidatedCount, panel.messages.length);
+    const oldSession = panel.messages.at(-1).session;
+    panel.dispose();
+    await commands.get('gap.inspectDefinition')();
+    check('reopening the pane creates a new message session', true,
+        panel.messages.at(-1).session !== oldSession);
+    openedSource = undefined;
+    panel.receive({ type: 'source', session: oldSession, epoch: panel.messages.at(-1).epoch, index: 0 });
+    await new Promise(resolve => setImmediate(resolve));
+    check('a closed pane session cannot navigate from the reopened pane', undefined, openedSource);
     inspector.dispose();
     check('disposing the inspector removes its native command', false, commands.has('gap.inspectDefinition'));
     summary();

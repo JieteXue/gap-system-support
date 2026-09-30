@@ -749,6 +749,46 @@ async function main() {
         const indexedBuiltin = await hoverAt(provider, doc, 'Size(');
         check('help-indexed function hovers without completion data', true,
             textOf(indexedBuiltin).includes('**built-in function**'));
+        const caseCode = [
+            'group := 7;',
+            'size := function() return group; end;',
+            'Check := function(group) return group; end;',
+            'record := rec(group := group);',
+            'group;',
+            'size();',
+            'record.group;',
+            'Group([]);',
+            'GROUP([]);',
+        ].join('\n');
+        const caseDoc = makeDocument('case-sensitive.g', caseCode, null);
+        const helpEntries = helpData.getHelpState().entries;
+        helpData.getHelpState = () => ({
+            entries: [
+                ...helpEntries,
+                { ...helpEntries[0], display: 'Group( generators )', key: 'group' },
+            ],
+        });
+        check('lowercase variable is not a built-in help match', 'variable',
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'group;')).symbolType);
+        check('lowercase function is not the uppercase built-in', 'function',
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'size();')).symbolType);
+        check('lowercase parameter retains its lexical definition', 'parameter',
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'group; end;', 1)).symbolType);
+        check('lowercase record field is not a built-in', undefined,
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'group;', 3)).builtin);
+        check('exact-case function signature still finds built-in help', 'built-in function',
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'Group([])')).symbolType);
+        check('uppercase variant does not find built-in help', undefined,
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'GROUP([])')).builtin);
+        check('native lowercase hover displays its own definition', true,
+            textOf(await hoverAt(provider, caseDoc, 'size();')).includes('size := function()'));
+        helpData.getHelpState = () => ({
+            entries: [{ ...helpEntries[0], type: '', display: 'Group', key: 'group' }],
+        });
+        check('GAPDoc exact-case name without type metadata still resolves', 'built-in function',
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'Group([])')).symbolType);
+        check('GAPDoc lowercase search key cannot classify code as a built-in', undefined,
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'group;')).builtin);
         const isBound = await hoverAt(provider, makeDocument('guard.g', 'if not IsBound(value) then\nfi;\n', null), 'IsBound(');
         check('runtime built-in function hovers without completion data', true,
             textOf(isBound).includes('**built-in function**'));

@@ -6,6 +6,8 @@
 2. Add a cursor-following, syntax-highlighted definition panel to the right, opened from the editor-title icon, native Hover, or the command palette; refresh unsaved edits and imported origins without recursive tooltip layers
 3. Make the pane contextual and interactive with lexical locals, clickable definition tokens, native reference Peek, published diagnostics, collapsible sections, pause/resume, and stable content during cursor updates
 4. Add source line numbers, a sticky code gutter, and indentation guides to the information pane; preserve syntax spans, navigation identities, and copied source text
+5. Match built-in help symbols case-sensitively so variables such as `group` are not mistaken for `Group`; keep normalized documentation search independent
+6. Reuse definition highlighting across occurrences and aliases, reject stale asynchronous source navigation, and isolate reopened pane sessions
 
 ## 0.4.1 - 2026-09-30
 

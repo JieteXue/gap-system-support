@@ -62,6 +62,12 @@ document version, position, and resolver revision. Highlight output is bounded
 to 8,000 tokens and Hover entry tickets to 128. Existing file-size and inference
 work limits continue to apply.
 
+An additional 64-entry source-definition cache shares excerpt text and highlight
+tokens across cursor offsets, calls, and aliases that reach the same definition.
+Its key includes source URI/version, declaration location, and resolver revision;
+the source text must also match. Alias titles and comments remain occurrence
+specific. Invalidating or closing the pane clears both preview caches.
+
 Unsaved edits, file saves, close/create/delete/rename events, and external GAP
 file changes invalidate snapshots. The current editor position is re-resolved
 instead of applying old offsets to new text. The file watcher and editor
@@ -86,6 +92,10 @@ their server-owned positions only on click. Local binding and diagnostic actions
 use issued indices and validate the origin snapshot. Reference queries reuse
 the registered provider, and obsolete asynchronous results cannot open Peek.
 
+Opening a source document rechecks the request epoch and source snapshot after
+asynchronous document loading, before showing an editor. A reopened pane gets a
+new session identity; messages from a closed pane cannot act on its replacement.
+
 ## Verification
 
 Automated coverage includes full definition boundaries, original CRLF/Unicode
@@ -97,6 +107,24 @@ Additional coverage checks lexical context, nested shadowing, captured bindings,
 clickable definition tokens, pause/resume/refresh, diagnostic publication,
 binding/message navigation, and stale asynchronous reference queries.
 
-Isolated renderer checks are not actual VS Code extension tests. The local
-VSIX is intended for user-led testing in the default VS Code window, without
-depending on an Extension Development Host debugger.
+Isolated renderer checks are not actual VS Code extension tests. Actual extension
+interaction testing remains user-led in the default VS Code window. Completing
+this feature does not automatically package, install, or release a VSIX.
+
+### VS Code Acceptance Checklist
+
+1. Open a GAP workspace and use the editor-title icon, native Hover link, and
+   command palette to open the same pane. Check that source-editor focus remains.
+2. Move through `ME`, `ME.Compare`, and fields of a returned record. Confirm each
+   selected segment and ambiguous-origin chooser matches Go to Definition.
+3. Verify `group` shows its own binding, while `Group` opens built-in help;
+   repeat with parameters, record fields, and a lowercase user-defined function.
+4. Check complete definitions, real line numbers, indentation guides, horizontal
+   scrolling, light/dark themes, a narrow pane, and copied multiline source.
+5. Click definition identifiers, local bindings, and diagnostics; invoke reference
+   Peek and verify aliases appear in references to the original definition.
+6. Pause, move the cursor, edit an imported source, refresh, and resume. Stale
+   content must not jump using old offsets. Rapid movements must settle on the
+   final occurrence without resetting unchanged sections.
+7. Close and reopen the pane; switch between GAP and non-GAP editors. Check
+   diagnostics update without cursor movement and old actions cannot navigate.
