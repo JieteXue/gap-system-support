@@ -30,6 +30,8 @@ export const VALUE_ORIGIN_MAX_STEPS = 1000;
 export const INSPECTION_CACHE_MAX_ENTRIES = 64;
 export const INSPECTION_MAX_TOKENS = 8000;
 export const INSPECTION_LINK_MAX_ENTRIES = 128;
+export const INSPECTION_MAX_BINDINGS = 128;
+export const INSPECTION_MAX_DIAGNOSTICS = 200;
 
 /** Parsed help descriptions retained for Hover. */
 export const HOVER_HELP_DESCRIPTION_CACHE_MAX_ENTRIES = 256;

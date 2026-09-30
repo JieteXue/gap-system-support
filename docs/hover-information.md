@@ -17,11 +17,42 @@ The pane uses the same static resolver as native Hover. Complete definitions
 retain their original whitespace and receive Tree-sitter syntax highlighting.
 It also shows comments, category, and a source link. Multiple possible origins
 have a chooser; built-ins show their signature/help summary and link to GAP Help.
-Unresolvable positions show an empty state rather than a previous definition.
+Click a highlighted identifier to go to its definition (Enter works with
+keyboard focus). Several origins use a picker instead of silently choosing one.
+The reference icon uses the existing reference provider and native Peek.
+Unresolvable positions show no definition while retaining useful source context.
+
+The **GAP Info** pane has independently collapsible sections:
+
+- **Definition**: the complete highlighted definition and documentation.
+- **Local Context**: the nearest function and visible parameters/local bindings.
+  Click a binding to reach its latest preceding source assignment or declaration.
+  Nested shadowing and captured outer bindings follow the resolver's lexical
+  model; later assignments and record fields are not local bindings.
+- **Messages**: diagnostics spanning the current cursor line.
+- **All Messages**: up to 200 nearby diagnostics from the source file, with the
+  full count in the heading. Click a message to reach its source location.
+
+This borrows the contextual sections and pause/resume interaction of Lean's
+Infoview without pretending GAP has proof goals, expected types, or statically
+known runtime values. Local entries are source bindings, not evaluated values.
+Diagnostics come from VS Code's published diagnostics, including the extension's
+syntax checker; the pane does not run a second syntax validation.
 
 Updates are debounced by 140 ms. Unsaved edits and workspace file changes
 invalidate cached results and re-resolve the current editor cursor. Focusing
 the panel preserves its contents; switching to a non-GAP editor clears them.
+The pause icon freezes the displayed occurrence; resume follows the latest
+cursor. Refresh while paused re-resolves the held occurrence if its text has
+not changed. If edited text makes the old offset unsafe, refresh uses the
+current source-editor cursor instead. Changed paused sources are visibly stale
+and cannot navigate using old offsets.
+
+Loading preserves the previous layout while disabling obsolete actions.
+Unchanged sections retain their DOM, expanded/collapsed state, selected text,
+and code scroll position. File changes and asynchronous reference results are
+checked against the current session/revision before navigation.
+
 Closing it releases its listeners, file watcher, pending update, and previews.
 There are no recursive layers, pin actions, or independent navigation history.
 

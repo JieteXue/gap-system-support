@@ -14,6 +14,9 @@ let panel;
 let openedSource;
 let selectionChanged;
 let activeChanged;
+let diagnosticsChanged;
+let diagnostics = [];
+let openedPosition;
 const disposable = () => ({ dispose() {} });
 vscodeMock.MarkdownString = class {
     constructor() { this.value = ''; }
@@ -44,6 +47,10 @@ vscodeMock.workspace = {
         dispose() {}, onDidChange: disposable, onDidCreate: disposable, onDidDelete: disposable,
     }),
 };
+vscodeMock.languages = {
+    getDiagnostics: () => diagnostics,
+    onDidChangeDiagnostics(callback) { diagnosticsChanged = callback; return disposable(); },
+};
 vscodeMock.window = {
     activeTextEditor: undefined,
     visibleTextEditors: [],
@@ -53,7 +60,7 @@ vscodeMock.window = {
     showWarningMessage: message => notifications.push(message),
     showTextDocument: async document => {
         openedSource = document;
-        return { document, selection: undefined, revealRange() {} };
+        return { document, selection: undefined, revealRange(range) { openedPosition = range.start; } };
     },
     createWebviewPanel() {
         const result = {
@@ -77,6 +84,7 @@ const { GAPDefinitionResolver } = require('../../../out/hover/definitionResolver
 const { GAPHoverProvider } = require('../../../out/hover/hoverProvider');
 const { DefinitionPreviewService } = require('../../../out/hover/definitionPreview');
 const { GAPDefinitionInspector, inspectionHtml } = require('../../../out/hover/definitionInspector');
+const { inspectionContext } = require('../../../out/hover/inspectionContext');
 const query = path.join(root, 'queries/completion.scm');
 const context = { extensionUri: vscodeMock.Uri.file(root) };
 const token = { isCancellationRequested: false };
@@ -183,6 +191,43 @@ async function main() {
     check('hostile string content stays plain source text', true, stringView.text.includes('<script>'));
     check('ordinary string content is not an inspectable symbol', false,
         stringView.tokens.some(token => token.name === 'unsafe'));
+    section('Lexical information context');
+    const lexical = document('lexical.g', [
+        'Outer := function(value)',
+        '  local temp, Inner;',
+        '  temp := rec(field := value);',
+        '  Inner := function(value)',
+        '    local inner;',
+        '    inner := value;',
+        '    return inner + temp.field;',
+        '  end;',
+        '  later := 3;',
+        '  return Inner;',
+        'end;',
+    ].join('\n'));
+    const contextModel = resolver.localContext(lexical, at(lexical, 'inner + temp'));
+    check('nearest named function owns the context', 'Inner', contextModel.scope);
+    check('nested shadowed parameters appear once', 1,
+        contextModel.bindings.filter(binding => binding.name === 'value').length);
+    check('nested parameter location belongs to inner scope', 3,
+        contextModel.bindings.find(binding => binding.name === 'value').row);
+    check('closure includes outer local bindings', true,
+        contextModel.bindings.some(binding => binding.name === 'temp'));
+    check('later assignments do not leak into the current context', false,
+        contextModel.bindings.some(binding => binding.name === 'later'));
+    check('record fields are not lexical local variables', false,
+        contextModel.bindings.some(binding => binding.name === 'field'));
+    diagnostics = Array.from({ length: 250 }, (_, index) => ({
+        message: `Distant ${index}`, severity: 1,
+        range: new vscodeMock.Range(20 + index, 0, 20 + index, 1),
+    }));
+    diagnostics.push({ message: 'Current', severity: 0, range: new vscodeMock.Range(6, 0, 6, 20) });
+    const boundedContext = inspectionContext(lexical, at(lexical, 'inner + temp'), resolver);
+    check('file message display is bounded', 200, boundedContext.diagnostics.length);
+    check('file message count includes omitted messages', 251, boundedContext.diagnosticCount);
+    check('current-line messages are retained even beyond the initial limit', 'Current',
+        boundedContext.diagnostics[0].message);
+    diagnostics = [];
     const livePreview = service.at(usage, at(usage, 'Factory(true)'))[0];
     library.replace(library.getText().replace('counter := 1;', 'counter := 200;'));
     resolver.onWorkspaceFilesChanged();
@@ -225,6 +270,15 @@ async function main() {
         index: 0, filePath: '/etc/passwd' });
     await new Promise(resolve => setImmediate(resolve));
     check('source navigation ignores client-supplied file paths', library.uri.toString(), openedSource.uri.toString());
+    panel.receive({ type: 'symbol', session: rootMessage.session, epoch: rootMessage.epoch,
+        index: 0, token: symbol(rootMessage.previews[0], 'leaf').id, filePath: '/etc/passwd' });
+    await new Promise(resolve => setImmediate(resolve));
+    check('clickable source tokens resolve their actual source definition', 1, openedPosition.line);
+    openedSource = undefined;
+    panel.receive({ type: 'symbol', session: rootMessage.session, epoch: rootMessage.epoch,
+        index: 0, token: 99999 });
+    await new Promise(resolve => setImmediate(resolve));
+    check('unissued symbol tokens cannot navigate', undefined, openedSource);
     section('Cursor following and debounce');
     const wait = () => new Promise(resolve => setTimeout(resolve, 180));
     editor.selection.active = at(usage, 'Middle.Make');
@@ -233,6 +287,7 @@ async function main() {
     editor.selection.active = at(usage, 'value;');
     selectionChanged({ textEditor: editor });
     check('cursor movement immediately retires the old preview', 'loading', panel.messages.at(-1).type);
+    check('loading does not resend large preview payloads', false, 'previews' in panel.messages.at(-1));
     await wait();
     check('rapid movement resolves the final cursor occurrence', 2, panel.messages.at(-1).previews.length);
     const latest = panel.messages.at(-1);
@@ -252,6 +307,77 @@ async function main() {
     await wait();
     check('unsaved edits refresh the current cursor definition', 'counter := 300;',
         panel.messages.at(-1).previews[0].text);
+    section('Pause, local actions, and diagnostic updates');
+    const send = (type, extra = {}) => {
+        const current = panel.messages.at(-1);
+        panel.receive({ type, session: current.session, epoch: current.epoch, ...extra });
+    };
+    send('follow', { value: false });
+    const paused = panel.messages.at(-1);
+    editor.selection.active = at(library, 'Factory :=');
+    selectionChanged({ textEditor: editor });
+    await wait();
+    check('pause preserves the displayed occurrence while cursor moves', paused, panel.messages.at(-1));
+    send('refresh');
+    check('refresh paused state retains its original occurrence', 'counter := 300;',
+        panel.messages.at(-1).previews[0].text);
+    send('follow', { value: true });
+    check('resume resolves the latest editor cursor', 'Factory', panel.messages.at(-1).previews[0].title);
+    editor.document = lexical;
+    editor.selection.active = at(lexical, 'inner + temp');
+    diagnostics = [
+        { message: '<script>error</script>', severity: 0, source: 'gap',
+            range: new vscodeMock.Range(6, 2, 7, 4) },
+        { message: 'Earlier warning', severity: 1, source: 'gap',
+            range: new vscodeMock.Range(0, 0, 0, 4) },
+    ];
+    activeChanged(editor);
+    await wait();
+    const withDiagnostics = panel.messages.at(-1);
+    check('pane includes nearest lexical scope', 'Inner', withDiagnostics.context.local.scope);
+    check('multiline diagnostics are current across their whole span', true,
+        withDiagnostics.context.diagnostics[0].current);
+    check('diagnostic message is plain data, not trusted markup', '<script>error</script>',
+        withDiagnostics.context.diagnostics[0].message);
+    const tempIndex = withDiagnostics.context.local.bindings.findIndex(item => item.name === 'temp');
+    send('binding', { index: tempIndex });
+    await new Promise(resolve => setImmediate(resolve));
+    check('local binding clicks navigate to the latest assignment', 2, openedPosition.line);
+    send('diagnostic', { index: 0 });
+    await new Promise(resolve => setImmediate(resolve));
+    check('diagnostic click uses the issued source location', 6, openedPosition.line);
+    diagnostics = [];
+    diagnosticsChanged({ uris: [lexical.uri] });
+    await wait();
+    check('diagnostic publication updates the pane without moving the cursor', 0,
+        panel.messages.at(-1).context.diagnosticCount);
+    let references;
+    let finishReferences;
+    commands.set('vscode.executeReferenceProvider', () =>
+        new Promise(resolve => { finishReferences = resolve; }));
+    commands.set('editor.action.showReferences', (...args) => { references = args; });
+    send('references');
+    await new Promise(resolve => setImmediate(resolve));
+    selectionChanged({ textEditor: editor });
+    finishReferences([]);
+    await new Promise(resolve => setImmediate(resolve));
+    check('obsolete asynchronous reference requests cannot open Peek', undefined, references);
+    await wait();
+    commands.set('vscode.executeReferenceProvider', () => []);
+    send('references');
+    await new Promise(resolve => setImmediate(resolve));
+    check('references reuse the registered provider and native Peek', lexical.uri.toString(),
+        references[0].toString());
+    send('follow', { value: false });
+    lexical.replace('\n' + lexical.getText());
+    resolver.onWorkspaceFilesChanged();
+    inspector.invalidate();
+    check('paused changed sources are explicitly marked stale', 'stale', panel.messages.at(-1).type);
+    openedSource = undefined;
+    send('binding', { index: tempIndex });
+    await new Promise(resolve => setImmediate(resolve));
+    check('stale local offsets cannot navigate', undefined, openedSource);
+    send('follow', { value: true });
     const html = inspectionHtml(panel.webview, context.extensionUri, 'testnonce');
     check('webview has a restrictive default CSP', true, html.includes("default-src 'none'"));
     check('webview scripts require a nonce', true, html.includes("script-src 'nonce-testnonce'"));

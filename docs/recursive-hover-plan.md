@@ -4,6 +4,11 @@ Status: implemented as a cursor-following right-hand pane. The original
 recursive-tooltip proposal was superseded by the requested simpler interface.
 Actual VS Code extension interaction testing remains user-led.
 
+The pane now uses a contextual **GAP Info** layout, inspired by the sections,
+source navigation, and pause controls in the
+[official Lean 4 Infoview manual](https://github.com/leanprover/vscode-lean4/blob/master/vscode-lean4/manual/manual.md#infoview).
+No Lean proof-state, expected-type, or widget execution machinery is emulated.
+
 ## Interaction
 
 - Keep native Hover, Go to Definition, and Find All References.
@@ -13,6 +18,9 @@ Actual VS Code extension interaction testing remains user-led.
 - Show the complete AST-delimited definition with syntax highlighting,
   comments, category, and source navigation.
 - Retain ambiguous origins in a selector rather than guessing one.
+- Click identifiers to navigate to real definitions without tooltip layers.
+- Show collapsible local context, current-line messages, and file messages.
+- Offer pause/resume, refresh, source location, and native reference Peek.
 - Do not expand nested tooltips or add pinning/history controls.
 
 The Hover entry carries the hovered occurrence's position, so opening it does
@@ -21,12 +29,23 @@ selection changes resume following. Focusing the webview leaves the current
 definition intact; switching to another GAP editor resolves that editor, while
 a non-GAP editor clears the content.
 
+Unchanged sections retain DOM identity, scroll positions, text selection, and
+fold state. Debounced loading keeps the displayed layout but disables navigation
+from obsolete data. Pausing freezes the occurrence; source edits mark it stale.
+
 ## Reuse And Source Mapping
 
 `GAPHoverProvider.resolveSymbol` is presentation-independent and shares the
 existing definition resolver, alias/read-chain handling, caller-input tracing,
 and help lookup. `DefinitionPreviewService` loads definitions through the
 resolver's shared open-document/file cache.
+
+`GAPDefinitionResolver.localContext` reuses the cached lexical event model rather
+than maintaining another completion scanner. It reports at most 128 visible
+parameter/local bindings, excludes record entries, and preserves nested shadowing.
+`inspectionContext` consumes already-published VS Code diagnostics, prioritizing
+current-line messages and bounding display to 200 entries. Published diagnostic
+changes refresh the pane without a cursor movement or a second syntax check.
 
 `definitionExcerpt` exposes syntax-tree boundaries. Preview text is the original
 source slice, preserving CRLF, Unicode, delimiters, and indentation. Highlight
@@ -62,12 +81,21 @@ candidate index. The host uses its own preview URI and source coordinates,
 validates freshness, and rejects obsolete or forged requests. Neither renderer
 evaluates GAP.
 
+Identifier-navigation messages use issued preview/token identities and resolve
+their server-owned positions only on click. Local binding and diagnostic actions
+use issued indices and validate the origin snapshot. Reference queries reuse
+the registered provider, and obsolete asynchronous results cannot open Peek.
+
 ## Verification
 
 Automated coverage includes full definition boundaries, original CRLF/Unicode
 source, highlight categories, nested aliases, alternate return origins,
 installation calls, built-ins, cursor debounce, editor switching, unsaved edits,
 safe source navigation, ticket expiry, CSP, and disposal.
+
+Additional coverage checks lexical context, nested shadowing, captured bindings,
+clickable definition tokens, pause/resume/refresh, diagnostic publication,
+binding/message navigation, and stale asynchronous reference queries.
 
 Isolated renderer checks are not actual VS Code extension tests. The local
 VSIX is intended for user-led testing in the default VS Code window, without

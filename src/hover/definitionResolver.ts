@@ -8,12 +8,12 @@ import { hasErrorAncestor } from '../shared/treeUtils';
 import { ReadChainFileCache, resolveReadBaseDir, resolveReadTarget } from '../shared/readFileCache';
 import { LruCache } from '../shared/lruCache';
 import { LazyQuery } from '../shared/lazyQuery';
-import { recordEntryLookupName } from '../shared/functionName';
+import { recordEntryLookupName, symbolLookupName } from '../shared/functionName';
 import { definitionText } from '../shared/definitionText';
 import { resolveValueFieldDefinitions } from './valueOriginResolver';
 import type { ValueCallSite, ValueSource } from './valueOriginResolver';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
-import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT, WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES } from '../limits';
+import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, INSPECTION_MAX_BINDINGS, READ_CONTENT_LIMIT, WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES } from '../limits';
 
 const WORKSPACE_SYMBOL_CACHE_MS = 5000;
 
@@ -108,6 +108,20 @@ export interface ResolvedDefinition {
     symbolKind?: DefinitionSymbolKind;
 }
 
+export interface LocalBinding {
+    name: string;
+    kind: DefinitionSymbolKind;
+    row: number;
+    column: number;
+}
+
+export interface LocalContext {
+    scope: string;
+    row: number;
+    column: number;
+    bindings: LocalBinding[];
+}
+
 interface WorkspaceSymbolIndex {
     symbols: Map<string, DefinitionCandidate[]>;
     calls: Map<string, ValueCallSite[]>;
@@ -152,6 +166,47 @@ export class GAPDefinitionResolver {
     readSourceDocument(filePath: string): vscode.TextDocument | null {
         return vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath) ??
             this.fileCache.loadFile(filePath)?.document ?? null;
+    }
+
+    /** Scalar lexical context from the existing cached resolution model. */
+    localContext(document: vscode.TextDocument, position: vscode.Position): LocalContext | null {
+        const model = this.documentModel(document);
+        if (!model) return null;
+        const offset = document.offsetAt(position);
+        const visible = this.visibleScopes(model.tree, offset, model.scopeByStart);
+        let node: SyntaxNode | null = model.tree.rootNode.descendantForIndex(
+            Math.max(0, Math.min(offset, model.tree.rootNode.endIndex - 1)));
+        if (hasErrorAncestor(node)) return null;
+        while (node && !model.scopeByStart.has(node.startIndex)) node = node.parent;
+        if (!node) return { scope: 'Global scope', row: 0, column: 0, bindings: [] };
+        const owner = node.parent;
+        const left = owner?.type === 'assignment_statement' || owner?.type === 'record_entry'
+            ? owner.childForFieldName('left') : null;
+        const result: LocalContext = {
+            scope: left ? symbolLookupName(left) : 'Anonymous function',
+            row: node.startPosition.row, column: node.startPosition.column, bindings: [],
+        };
+        const names = new Set<string>();
+        const events = model.events.filter((event): event is Extract<FileEvent, { kind: 'def' }> =>
+            event.kind === 'def' && event.scope !== GLOBAL_SCOPE &&
+            visible.has(event.scope) && event.offset <= offset &&
+            !/[.!]/.test(event.name) && event.role === 'local',
+        ).sort((a, b) => b.scope - a.scope || b.offset - a.offset);
+        for (const event of events) {
+            const definitionNode = model.tree.rootNode.descendantForIndex(
+                document.offsetAt(new vscode.Position(event.row, event.column)));
+            if (definitionNode.parent?.type === 'record_entry') continue;
+            if (names.has(event.name)) continue;
+            names.add(event.name);
+            result.bindings.push({
+                name: event.name, kind: event.symbolKind, row: event.row, column: event.column,
+            });
+            if (result.bindings.length === INSPECTION_MAX_BINDINGS) break;
+        }
+        result.bindings.sort((a, b) =>
+            Number(b.kind === 'parameter') - Number(a.kind === 'parameter') ||
+            a.name.localeCompare(b.name));
+        return result;
     }
 
     onDocumentClosed(uri: vscode.Uri): void {
