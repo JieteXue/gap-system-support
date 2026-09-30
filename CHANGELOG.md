@@ -1,5 +1,10 @@
 ## Unreleased
 
+1. Resolve global aliases such as `ME := MagneticEquivalence` across source files, with segment-specific Hover and reverse references through renamed roots
+2. Trace returned record fields through assignments, forwarding functions, parameters, and list element origins for Hover and definition/reference navigation
+3. Show complete syntax-tree-delimited definitions in Hover, including function bodies, nested records, and installation calls
+4. Share navigation resolution models, index workspace symbols once per cache lifetime, bound caches, and avoid repeated disk reads; preserve node safety during parser eviction
+
 ## 0.4.0 - 2026-09-29
 
 1. Expand Go to Definition across lexical symbols, qualified record/component paths, GAP declarations, bindings, installations, and multiple method implementations

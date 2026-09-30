@@ -22,6 +22,21 @@ rules, caching, and verification, see
 - Complete-path matching, so `A.Print` and `B.Print` remain distinct
 - Calls through record and component selectors
 
+## Global Aliases
+
+- Identifier and qualified-record targets such as `ME := MagneticEquivalence`
+  and `Compare := MagneticEquivalence.Compare`
+- Chained global aliases and bindings imported by literal `Read()` calls
+- Cursor-sensitive alias assignments: a later binding does not change an
+  earlier occurrence
+- Qualified uses whose root is renamed, without merging unrelated paths
+- Reverse references from canonical definitions to uses through aliases
+
+Alias normalization covers syntactically recognizable global assignments.
+It is not general scope-sensitive alias analysis: local aliases, computed
+selectors, conditional execution, and runtime rebinding are not fully modeled.
+Circular alias chains terminate without executing GAP.
+
 ## Returned Record Fields
 
 - Fields of `result := Function(...)` when the function returns `rec(...)`
