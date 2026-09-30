@@ -66,6 +66,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
 
     onWorkspaceFilesChanged(): void {
         this.workspaceUriCache.clear();
+        this.resolver.onWorkspaceFilesChanged();
     }
 
     async provideReferences(
@@ -90,6 +91,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
             node.startPosition.column,
         );
         const targetDefinitions = new Set(definitions.map(definitionKey));
+        const targetNames = new Set(this.resolver.resolveLookupNames(document, position, lookupName));
         const definitionLocations = new Set(definitions.map(definitionKey));
         const documents = await this.workspaceDocuments(document, token);
         const locations: vscode.Location[] = [];
@@ -157,15 +159,27 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                 // If static lexical resolution finds a different definition,
                 // this occurrence belongs to that local symbol instead.
                 if (!isDefinition) {
-                    const localDefinition = this.resolver.resolveDefinition(
-                        candidateDocument,
-                        new vscode.Position(
-                            candidate.startPosition.row,
-                            candidate.startPosition.column,
-                        ),
-                        lookupName,
+                    const candidateName = symbolLookupName(candidate);
+                    const candidatePosition = new vscode.Position(
+                        candidate.startPosition.row,
+                        candidate.startPosition.column,
                     );
-                    if (localDefinition && !targetDefinitions.has(definitionKey(localDefinition))) {
+                    const candidateNames = this.resolver.resolveLookupNames(
+                        candidateDocument, candidatePosition, candidateName,
+                    );
+                    if (candidateName !== lookupName &&
+                        !candidateNames.some(name => targetNames.has(name))) continue;
+                    const isAlias = candidateNames.some(name => name !== candidateName);
+                    const localDefinition = isAlias ? null : this.resolver.resolveDefinition(
+                        candidateDocument, candidatePosition, candidateName,
+                    );
+                    const candidateDefinitions = localDefinition ? [localDefinition] :
+                        this.resolver.resolveDefinitions(
+                            candidateDocument, candidatePosition, candidateName,
+                        );
+                    if (candidateDefinitions.length > 0
+                        ? !candidateDefinitions.some(item => targetDefinitions.has(definitionKey(item)))
+                        : candidateName !== lookupName) {
                         continue;
                     }
                 }
@@ -190,7 +204,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         const key = document.uri.toString();
         const cached = this.symbolIndexCache.get(key);
         if (cached?.version === document.version) {
-            return cached.symbols.get(lookupName) ?? [];
+            return this.referenceCandidates(cached.symbols, lookupName);
         }
 
         const tree = getDocumentTree(document, text);
@@ -209,7 +223,22 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         };
         visit(tree.rootNode);
         this.symbolIndexCache.set(key, { version: document.version, symbols });
-        return symbols.get(lookupName) ?? [];
+        return this.referenceCandidates(symbols, lookupName);
+    }
+
+    private referenceCandidates(symbols: Map<string, SyntaxNode[]>, lookupName: string): SyntaxNode[] {
+        const qualified = /[.!]/.test(lookupName);
+        const leaf = lookupName.split(/[.!]/).filter(Boolean).pop();
+        const candidates: SyntaxNode[] = [];
+        for (const [name, nodes] of symbols) {
+            // Aliases change the root, but preserve the selected field name.
+            if (qualified
+                ? name.split(/[.!]/).filter(Boolean).pop() === leaf
+                : !/[.!]/.test(name)) {
+                candidates.push(...nodes);
+            }
+        }
+        return candidates;
     }
 
     private async workspaceDocuments(

@@ -573,8 +573,8 @@ async function main() {
             'fi;',
         ].join('\n');
         const qualifiedDoc = makeDocument('qualified-use.g', qualifiedCode, tmp);
-        check('qualified call hovers from the left identifier', true,
-            textOf(await hoverAt(provider, qualifiedDoc, 'MAGNETIC_INTERNAL')).includes('**function**'));
+        check('qualified call root hovers as its own variable', true,
+            textOf(await hoverAt(provider, qualifiedDoc, 'MAGNETIC_INTERNAL')).includes('**variable**'));
         check('qualified call hovers from the selector identifier', true,
             textOf(await hoverAt(provider, qualifiedDoc, 'IsIntegralSquareMatrix')).includes('**function**'));
         check('qualified call hovers from the dot', true,
@@ -589,8 +589,8 @@ async function main() {
             qualifiedDefinitionCode,
             tmp,
         );
-        check('qualified definition hovers from the left identifier', true,
-            textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'MAGNETIC_INTERNAL')).includes('**function**'));
+        check('qualified definition root hovers as its own variable', true,
+            textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'MAGNETIC_INTERNAL')).includes('**variable**'));
         check('qualified definition hovers from the selector identifier', true,
             textOf(await hoverAt(provider, qualifiedDefinitionDoc, 'CheckFiniteMatrixGroup')).includes('**function**'));
         check('qualified definition hovers from the dot', true,
@@ -614,6 +614,26 @@ async function main() {
             textOf(await hoverAt(provider, aliasDoc, 'ME;', 0)).includes('MagneticEquivalence := rec'));
         check('cross-file alias member hovers through its target', true,
             textOf(await hoverAt(provider, aliasDoc, 'Compare(1)')).includes('**function**'));
+        fs.writeFileSync(path.join(tmp, 'nested-equivalence.g'), [
+            'NestedEquivalence := rec(',
+            '  Compare := rec(',
+            '    Representations := function(left, right) return true; end',
+            '  )',
+            ');',
+        ].join('\n'));
+        const nestedCode = [
+            'Read(libraryFilename);',
+            'ME := NestedEquivalence;',
+            'ME.Compare.Representations(1, 2);',
+        ].join('\n');
+        const nestedDoc = makeDocument('nested-use.g', nestedCode, tmp);
+        provider.onWorkspaceFilesChanged();
+        check('dynamic loader alias root shows the record, not the leaf function', true,
+            textOf(await hoverAt(provider, nestedDoc, 'ME.Compare')).includes('NestedEquivalence := rec'));
+        check('nested alias middle selector shows its own record field', true,
+            textOf(await hoverAt(provider, nestedDoc, 'Compare.Representations')).includes('Compare := rec'));
+        check('nested alias leaf shows the function', true,
+            textOf(await hoverAt(provider, nestedDoc, 'Representations(1')).includes('**function**'));
         workspaceState.textDocuments.length = 0;
     } finally {
         workspaceState.folderPath = null;

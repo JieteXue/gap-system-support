@@ -236,7 +236,50 @@ async function main() {
         }
     }
 
-    section('5. Declaration APIs and syntax exclusions');
+    section('5. Alias references in both directions');
+    {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gap-alias-references-'));
+        try {
+            const definitionText = [
+                'MagneticEquivalence := rec(',
+                '  Compare := rec(Run := function(x) return x; end)',
+                ');',
+            ].join('\n');
+            const usageText = [
+                'Read("definitions.g");',
+                'ME := MagneticEquivalence;',
+                'ME.Compare.Run(1);',
+                'MagneticEquivalence.Compare.Run(2);',
+                'Other := rec(Compare := rec(Run := 1));',
+                'Other.Compare.Run;',
+            ].join('\n');
+            fs.writeFileSync(path.join(tmp, 'definitions.g'), definitionText);
+            fs.writeFileSync(path.join(tmp, 'usage.g'), usageText);
+            const definitionDoc = makeDocument('definitions.g', definitionText, tmp);
+            const usageDoc = makeDocument('usage.g', usageText, tmp);
+            workspaceState.folderPath = tmp;
+            workspaceState.documents = [definitionDoc, usageDoc];
+            const aliasProvider = new GAPReferenceProvider(QUERY_PATH);
+            check('field definition finds canonical and renamed usages',
+                ['usage.g:2', 'usage.g:3'],
+                fileAndLineOf(await referencesAt(aliasProvider, definitionDoc, 'Run :=')));
+            check('alias usage finds original definition and canonical usage',
+                ['definitions.g:1', 'usage.g:3'],
+                fileAndLineOf(await referencesAt(aliasProvider, usageDoc, 'Run(1)')));
+            check('root definition finds alias root uses',
+                ['usage.g:1', 'usage.g:2', 'usage.g:3'],
+                fileAndLineOf(await referencesAt(aliasProvider, definitionDoc, 'MagneticEquivalence')));
+            check('middle field definition finds alias selector',
+                ['usage.g:2', 'usage.g:3'],
+                fileAndLineOf(await referencesAt(aliasProvider, definitionDoc, 'Compare :=')));
+        } finally {
+            workspaceState.folderPath = null;
+            workspaceState.documents = [];
+            fs.rmSync(tmp, { recursive: true, force: true });
+        }
+    }
+
+    section('6. Declaration APIs and syntax exclusions');
     {
         const code = [
             'DeclareGlobalFunction("declaredFn");',

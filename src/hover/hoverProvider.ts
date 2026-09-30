@@ -127,8 +127,6 @@ function selectorExpression(node: SyntaxNode): SyntaxNode {
 }
 
 function hoverSymbolNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null {
-    const symbol = symbolNameNodeAt(root, offset);
-    if (symbol) return symbol;
     for (const node of syntaxNodeAt(root, offset)) {
         if ((node?.text === '.' || node?.text === '!.') &&
             (node.parent?.type === 'record_selector' ||
@@ -136,12 +134,11 @@ function hoverSymbolNodeAt(root: SyntaxNode, offset: number): SyntaxNode | null 
             return node.parent.childForFieldName('selector');
         }
     }
-    return null;
+    return symbolNameNodeAt(root, offset);
 }
 
 function hoverLookupName(node: SyntaxNode): string {
-    const expression = selectorExpression(node);
-    return expression.id === node.id ? symbolLookupName(node) : expression.text;
+    return symbolLookupName(node);
 }
 
 function isCallCallee(node: SyntaxNode): boolean {
@@ -437,7 +434,11 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         }
 
         // Gate 3: user-defined symbols resolved through the Read chain.
-        let resolved = this.resolver.resolveDefinition(document, position, name);
+        const lookupNames = this.resolver.resolveLookupNames(document, position, name);
+        const isAlias = lookupNames.some(candidate => candidate !== name);
+        let resolved = isAlias
+            ? this.resolver.resolveDefinitions(document, position, name)[0] ?? null
+            : this.resolver.resolveDefinition(document, position, name);
         // A loader may use a symbol in an IsBound guard before Read() loads its definition.
         if (!resolved && isIsBoundArgument(node)) {
             resolved = this.resolver.resolveDefinitionFromFutureReads(document, position, name);
@@ -445,7 +446,8 @@ export class GAPHoverProvider implements vscode.HoverProvider {
                 resolved = this.resolver.resolveWorkspaceDefinition(document, name);
             }
         }
-        if (!resolved && (name.includes('.') || name.includes('!')) && isCallCallee(node)) {
+        if (!resolved && (name.includes('.') || name.includes('!') ||
+            selectorExpression(node).id !== node.id)) {
             resolved = this.resolver.resolveWorkspaceDefinition(document, name);
         }
         if (resolved) {

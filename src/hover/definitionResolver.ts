@@ -284,6 +284,37 @@ export class GAPDefinitionResolver {
         }) : null;
     }
 
+    /** Expand aliases at the cursor for all symbol consumers. */
+    resolveLookupNames(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        name: string,
+    ): string[] {
+        if (!isParserReady()) return [name];
+        const text = document.getText();
+        if (text.length > READ_CONTENT_LIMIT) return [name];
+        const tree = getDocumentTree(document, text);
+        const cached = this.documentCache.peek(document.uri.toString());
+        let events: FileEvent[];
+        if (cached?.version === document.version && cached.tree === tree) {
+            events = cached.events;
+            this.documentCache.touch(document.uri.toString(), cached);
+        } else {
+            const collected = this.collectEvents(tree.rootNode, false);
+            events = collected.events.sort((a, b) => a.offset - b.offset);
+            this.documentCache.set(document.uri.toString(), {
+                version: document.version,
+                tree,
+                events,
+                scopeByStart: collected.scopeByStart,
+                lines: text.split(/\r?\n/),
+            });
+        }
+        return [...this.resolveAliasNames(
+            events, name, document.offsetAt(position), resolveReadBaseDir(document),
+        )];
+    }
+
     /** Resolve all static declaration/installation locations for a GAP symbol. */
     resolveDefinitions(
         document: vscode.TextDocument,
