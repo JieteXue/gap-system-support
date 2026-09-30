@@ -25,7 +25,11 @@ a:hover {
 pre {
   background: #252526;
   color: #d4d4d4;
-  border-color: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  border-radius: 3px;
+  padding: 16px;
+  overflow: auto;
+  font-family: "Courier New", Courier, monospace;
 }
 
 code, tt {

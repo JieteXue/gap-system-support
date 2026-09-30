@@ -1,7 +1,7 @@
 {
   "name": "gap-system-support",
   "displayName": "GAP System Support",
-  "description": "Intelligent code editing powered by tree-sitter-gap, GAP code running, a help system, and language model tools for GAP",
+  "description": "Intelligent code editing powered by tree-sitter-gap, GAP code running, a help system, and language model tools",
   "version": "0.4.2",
   "publisher": "flianlee",
   "author": "Songtai Li",
@@ -256,9 +256,13 @@
           {
             "id": "addGapToPath",
             "title": "Add GAP to the PATH",
+            "description": "Make sure GAP is installed and added to the system PATH.\n[Open README](command:gap.openReadme)",
             "media": {
               "markdown": "media/install-gap.md"
-            }
+            },
+            "completionEvents": [
+              "onCommand:gap.openReadme"
+            ]
           },
           {
             "id": "setDocPath",

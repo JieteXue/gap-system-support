@@ -1,3 +1,5 @@
+# Changelog
+
 ## Unreleased
 
 1. Resolve fields of function parameters from statically recognizable workspace callers, including wrapper calls and `for` list element bindings; match callee definition identities to exclude unrelated functions
@@ -16,6 +18,8 @@
 3. Add static Hover categories, built-in help summaries, language keyword/operator/punctuation descriptions, cross-file guarded lookup, and syntax-highlighted GAP snippets
 4. Cache parsed files, workspace symbol/reference indexes, help lookups, and documentation summaries to keep repeated editor requests responsive
 
+Special thanks to [@JieteXue](https://github.com/JieteXue) for contributing these features.
+
 ## 0.3.5
 
 1. Add GAP syntax checking tool and integrate with diagnostics
@@ -28,6 +32,7 @@
 1. Add Go to Definition and Peek Definition support through VS Code's DefinitionProvider API
 
 ## 0.3.3
+
 1. Update `README.md` and `README.zh-cn.md`
 
 ## 0.3.2
