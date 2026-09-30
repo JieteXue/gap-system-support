@@ -131,6 +131,20 @@ Press `Ctrl+Shift+P` or `F1` to open the Command Palette and use the following c
 
 These commands are also available in the editor context menu (right-click menu) of GAP files, where `GAP: Search GAP Help` and `GAP: Run GAP File` are at the top level, while the remaining commands are grouped in the **More GAP Commands** submenu.
 
+## Public Test Release
+
+The public test build is available in
+[GitHub Releases](https://github.com/JieteXue/gap-system-support/releases/tag/v0.4.2-beta.1).
+Download `gap-system-support-0.4.2-beta.1.vsix`, run **Extensions: Install from
+VSIX...** in VS Code, and then run **Developer: Reload Window**. The package
+uses extension version `0.4.2` and is marked as a pre-release; it is not a stable
+Marketplace release. Installing it replaces an older local build with the same
+extension ID, including the earlier `0.4.2` test package.
+
+Use the [VS Code acceptance checklist](docs/definition-panel.md#vs-code-acceptance-checklist)
+to test the information pane. Include the GAP source excerpt, expected behavior,
+VS Code version, and extension version when reporting issues.
+
 ## Development
 
 Implementation and coverage notes:
@@ -159,7 +173,14 @@ VS Code installation:
 npx @vscode/vsce package
 ```
 
-Then press `F5` to start debugging.
+Packaging automatically compiles the TypeScript sources. For a test package:
+
+```bash
+npx @vscode/vsce package --pre-release --out gap-system-support-0.4.2-beta.1.vsix
+```
+
+Install the VSIX and reload the window to test in a normal VS Code window.
+Alternatively, press `F5` to start an Extension Development Host.
 
 ## Acknowledgements
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.2 Beta 1 - 2026-09-30
+
+Public testing release: GitHub tag `v0.4.2-beta.1`, VSIX version `0.4.2`
+with the pre-release flag. The stable release remains `v0.4.1`.
+Real VS Code interaction acceptance remains user-led.
+
 1. Resolve fields of function parameters from statically recognizable workspace callers, including wrapper calls and `for` list element bindings; match callee definition identities to exclude unrelated functions
 2. Add a cursor-following, syntax-highlighted definition panel to the right, opened from the editor-title icon, native Hover, or the command palette; refresh unsaved edits and imported origins without recursive tooltip layers
 3. Make the pane contextual and interactive with lexical locals, clickable definition tokens, native reference Peek, published diagnostics, collapsible sections, pause/resume, and stable content during cursor updates

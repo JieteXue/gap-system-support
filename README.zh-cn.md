@@ -130,6 +130,18 @@ source ~/.bashrc
 
 这些命令也会出现在 GAP 文件的编辑器上下文菜单（右键菜单）中，其中 `GAP: Search GAP Help` 和 `GAP: Run GAP File` 位于菜单顶层，其余命令聚合在 **More GAP Commands** 子菜单中。
 
+## 公开测试版
+
+公开测试包见
+[GitHub Releases](https://github.com/JieteXue/gap-system-support/releases/tag/v0.4.2-beta.1)。
+下载 `gap-system-support-0.4.2-beta.1.vsix`，在 VS Code 中执行
+**Extensions: Install from VSIX...**，然后执行 **Developer: Reload Window**。
+扩展版本为 `0.4.2`，包已标记为预发布，不是 Marketplace 正式版本。
+安装后会替换相同扩展 ID 的旧包，包括此前本地安装的 `0.4.2` 测试包。
+
+请按[VS Code 实测清单](docs/definition-panel.md#vs-code-acceptance-checklist)
+验证信息栏；反馈问题时附上 GAP 代码片段、预期行为、VS Code 版本和扩展版本。
+
 ## 开发
 
 实现与覆盖范围文档：
@@ -157,7 +169,14 @@ npm test
 npx @vscode/vsce package
 ```
 
-之后按 `F5` 即可启动调试。
+打包会自动编译 TypeScript 源码。测试包可用以下命令构建：
+
+```bash
+npx @vscode/vsce package --pre-release --out gap-system-support-0.4.2-beta.1.vsix
+```
+
+安装 VSIX 并重新加载窗口，即可在普通 VS Code 窗口中测试。
+也可按 `F5` 启动扩展开发主机。
 
 ## 致谢
 
