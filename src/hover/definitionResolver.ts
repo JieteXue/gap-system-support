@@ -8,12 +8,12 @@ import { hasErrorAncestor } from '../shared/treeUtils';
 import { ReadChainFileCache, resolveReadBaseDir, resolveReadTarget } from '../shared/readFileCache';
 import { LruCache } from '../shared/lruCache';
 import { LazyQuery } from '../shared/lazyQuery';
-import { recordEntryLookupName } from '../shared/functionName';
+import { recordEntryLookupName, symbolLookupName } from '../shared/functionName';
 import { definitionText } from '../shared/definitionText';
 import { resolveValueFieldDefinitions } from './valueOriginResolver';
-import type { ValueSource } from './valueOriginResolver';
+import type { ValueCallSite, ValueSource } from './valueOriginResolver';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
-import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT, WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES } from '../limits';
+import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, INSPECTION_MAX_BINDINGS, READ_CONTENT_LIMIT, WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES } from '../limits';
 
 const WORKSPACE_SYMBOL_CACHE_MS = 5000;
 
@@ -57,6 +57,7 @@ interface EventFile {
     /** Source lines without trailing line breaks. */
     lines: string[];
     document: vscode.TextDocument;
+    calls: { name: string; offset: number }[];
 }
 
 interface DocumentModel extends EventFile {
@@ -107,9 +108,29 @@ export interface ResolvedDefinition {
     symbolKind?: DefinitionSymbolKind;
 }
 
-interface WorkspaceSymbolCacheEntry {
-    expiresAt: number;
+export interface LocalBinding {
+    name: string;
+    kind: DefinitionSymbolKind;
+    row: number;
+    column: number;
+}
+
+export interface LocalContext {
+    scope: string;
+    row: number;
+    column: number;
+    bindings: LocalBinding[];
+}
+
+interface WorkspaceSymbolIndex {
     symbols: Map<string, DefinitionCandidate[]>;
+    calls: Map<string, ValueCallSite[]>;
+    unqualifiedCalls: ValueCallSite[];
+    aliasRoots: Set<string>;
+}
+
+interface WorkspaceSymbolCacheEntry extends WorkspaceSymbolIndex {
+    expiresAt: number;
 }
 
 export class GAPDefinitionResolver {
@@ -132,6 +153,61 @@ export class GAPDefinitionResolver {
     });
     private resolvingValueFields = false;
     private workspaceRevision = 0;
+
+    get revision(): number {
+        return this.workspaceRevision;
+    }
+
+    sourceDocument(filePath: string, current: vscode.TextDocument): vscode.TextDocument | null {
+        return !filePath || filePath === current.uri.fsPath ? current :
+            this.readSourceDocument(filePath);
+    }
+
+    readSourceDocument(filePath: string): vscode.TextDocument | null {
+        return vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath) ??
+            this.fileCache.loadFile(filePath)?.document ?? null;
+    }
+
+    /** Scalar lexical context from the existing cached resolution model. */
+    localContext(document: vscode.TextDocument, position: vscode.Position): LocalContext | null {
+        const model = this.documentModel(document);
+        if (!model) return null;
+        const offset = document.offsetAt(position);
+        const visible = this.visibleScopes(model.tree, offset, model.scopeByStart);
+        let node: SyntaxNode | null = model.tree.rootNode.descendantForIndex(
+            Math.max(0, Math.min(offset, model.tree.rootNode.endIndex - 1)));
+        if (hasErrorAncestor(node)) return null;
+        while (node && !model.scopeByStart.has(node.startIndex)) node = node.parent;
+        if (!node) return { scope: 'Global scope', row: 0, column: 0, bindings: [] };
+        const owner = node.parent;
+        const left = owner?.type === 'assignment_statement' || owner?.type === 'record_entry'
+            ? owner.childForFieldName('left') : null;
+        const result: LocalContext = {
+            scope: left ? symbolLookupName(left) : 'Anonymous function',
+            row: node.startPosition.row, column: node.startPosition.column, bindings: [],
+        };
+        const names = new Set<string>();
+        const events = model.events.filter((event): event is Extract<FileEvent, { kind: 'def' }> =>
+            event.kind === 'def' && event.scope !== GLOBAL_SCOPE &&
+            visible.has(event.scope) && event.offset <= offset &&
+            !/[.!]/.test(event.name) && event.role === 'local',
+        ).sort((a, b) => b.scope - a.scope || b.offset - a.offset);
+        for (const event of events) {
+            const definitionNode = model.tree.rootNode.descendantForIndex(
+                document.offsetAt(new vscode.Position(event.row, event.column)));
+            if (definitionNode.parent?.type === 'record_entry') continue;
+            if (names.has(event.name)) continue;
+            names.add(event.name);
+            result.bindings.push({
+                name: event.name, kind: event.symbolKind, row: event.row, column: event.column,
+            });
+            if (result.bindings.length === INSPECTION_MAX_BINDINGS) break;
+        }
+        result.bindings.sort((a, b) =>
+            Number(b.kind === 'parameter') - Number(a.kind === 'parameter') ||
+            a.name.localeCompare(b.name));
+        return result;
+    }
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.fileCache.onDocumentClosed(uri);
@@ -165,15 +241,14 @@ export class GAPDefinitionResolver {
             document, text, lines, lineOffsets, tree, version: document.version,
             events: collected.events.sort((a, b) => a.offset - b.offset),
             scopeByStart: collected.scopeByStart,
+            calls: collected.calls,
         };
         this.documentCache.set(key, model);
         return model;
     }
 
     private valueSource(filePath: string, current: vscode.TextDocument): ValueSource | null {
-        const document = !filePath || filePath === current.uri.fsPath ? current :
-            vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath) ??
-            this.fileCache.loadFile(filePath)?.document;
+        const document = this.sourceDocument(filePath, current);
         if (!document) return null;
         const model = this.documentModel(document);
         return model ? {
@@ -338,9 +413,15 @@ export class GAPDefinitionResolver {
         if (this.resolvingValueFields || !name.includes('.')) return [];
         this.resolvingValueFields = true;
         try {
-            return resolveValueFieldDefinitions(document, position, name,
-                (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName),
-                filePath => this.valueSource(filePath, document));
+            return resolveValueFieldDefinitions(document, position, name, {
+                findDefinitions: (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName),
+                findCallDefinitions: (source, at, lookupName) => {
+                    const lexical = this.resolveDefinition(source, at, lookupName);
+                    return lexical ? [lexical] : this.resolveDefinitions(source, at, lookupName);
+                },
+                loadSource: filePath => this.valueSource(filePath, document),
+                findCallSites: (lookupName, source) => this.valueCallSites(lookupName, source),
+            });
         } finally {
             this.resolvingValueFields = false;
         }
@@ -409,25 +490,57 @@ export class GAPDefinitionResolver {
         name: string,
         currentFilePath: string,
     ): DefinitionCandidate[] {
+        const cached = this.workspaceIndex(baseDir);
+        return (cached.symbols.get(name) ?? []).filter(candidate => candidate.filePath !== currentFilePath);
+    }
+
+    private valueCallSites(name: string, document: vscode.TextDocument): ValueCallSite[] {
+        const leaf = name.split('.').pop()!;
+        const model = this.documentModel(document);
+        const baseDir = resolveReadBaseDir(document);
+        const index = baseDir ? this.workspaceIndex(baseDir) : null;
+        const aliases = new Set([
+            ...(index?.aliasRoots ?? []),
+            ...(model?.aliases?.changes.keys() ?? []),
+        ]);
+        const matches = (callee: string) =>
+            callee.split('.').pop() === leaf || (!callee.includes('.') && aliases.has(callee));
+        const sites = (model?.calls ?? []).filter(call => matches(call.name))
+            .map(call => ({ ...call, filePath: document.isUntitled ? '' : document.uri.fsPath }));
+        if (!index) return sites;
+        const candidates = new Set([
+            ...(index.calls.get(leaf) ?? []),
+            ...index.unqualifiedCalls.filter(site => aliases.has(site.name)),
+        ]);
+        for (const site of candidates) {
+            if (site.filePath !== document.uri.fsPath) sites.push(site);
+        }
+        return sites;
+    }
+
+    private workspaceIndex(baseDir: string): WorkspaceSymbolCacheEntry {
         const now = Date.now();
         let cached = this.workspaceSymbolCache.peek(baseDir);
         if (!cached || cached.expiresAt <= now) {
             cached = {
                 expiresAt: now + WORKSPACE_SYMBOL_CACHE_MS,
-                symbols: this.scanWorkspaceSymbolDefinitions(baseDir),
+                ...this.scanWorkspaceSymbolDefinitions(baseDir),
             };
             this.workspaceSymbolCache.set(baseDir, cached);
         } else {
             this.workspaceSymbolCache.touch(baseDir, cached);
         }
-        return (cached.symbols.get(name) ?? []).filter(candidate => candidate.filePath !== currentFilePath);
+        return cached;
     }
 
     /** Find top-level user definitions in sibling GAP source files. */
     private scanWorkspaceSymbolDefinitions(
         baseDir: string,
-    ): Map<string, DefinitionCandidate[]> {
+    ): WorkspaceSymbolIndex {
         const symbols = new Map<string, DefinitionCandidate[]>();
+        const calls = new Map<string, ValueCallSite[]>();
+        const unqualifiedCalls: ValueCallSite[] = [];
+        const aliasRoots = new Set<string>();
         const visited = new Set<string>();
         const sourceExtensions = new Set(['.g', '.gd', '.gi', '.gap']);
 
@@ -450,7 +563,16 @@ export class GAPDefinitionResolver {
                 visited.add(filePath);
                 const read = this.fileCache.loadFile(filePath);
                 if (!read) continue;
+                for (const call of read.calls) {
+                    const site = { ...call, filePath };
+                    const leaf = call.name.split('.').pop()!;
+                    const bucket = calls.get(leaf);
+                    if (bucket) bucket.push(site);
+                    else calls.set(leaf, [site]);
+                    if (!call.name.includes('.')) unqualifiedCalls.push(site);
+                }
                 for (const event of read.events) {
+                    if (event.kind === 'alias' && event.scope === GLOBAL_SCOPE) aliasRoots.add(event.name);
                     if (event.kind === 'def' && event.scope === GLOBAL_SCOPE) {
                         const candidate = { event, lines: read.lines, filePath };
                         const bucket = symbols.get(event.name);
@@ -462,7 +584,7 @@ export class GAPDefinitionResolver {
         };
 
         visit(baseDir);
-        return symbols;
+        return { symbols, calls, unqualifiedCalls, aliasRoots };
     }
 
     private scanAllSymbolDefinitions(
@@ -673,8 +795,11 @@ export class GAPDefinitionResolver {
     }
 
     /** Collect definition and Read events plus the scope index for one parsed file. */
-    private collectEvents(rootNode: SyntaxNode): { events: FileEvent[]; scopeByStart: Set<number> } {
+    private collectEvents(rootNode: SyntaxNode): {
+        events: FileEvent[]; scopeByStart: Set<number>; calls: { name: string; offset: number }[];
+    } {
         const events: FileEvent[] = [];
+        const calls: { name: string; offset: number }[] = [];
         // Scope nodes of this file, from the shared completion.scm capture.
         const scopeByStart = new Set<number>();
         const defNodes = new Map<
@@ -726,6 +851,13 @@ export class GAPDefinitionResolver {
         // Record fields are definitions too. They are intentionally collected
         // from the AST because completion.scm only models lexical variables.
         const collectRecordFields = (node: SyntaxNode): void => {
+            if (node.type === 'call') {
+                const callee = node.childForFieldName('function');
+                if (callee && ['identifier', 'record_selector'].includes(callee.type) &&
+                    !hasErrorAncestor(callee)) {
+                    calls.push({ name: callee.text, offset: node.startIndex });
+                }
+            }
             if (node.type === 'record_entry') {
                 const left = node.childForFieldName('left');
                 if (left?.type === 'identifier' && !hasErrorAncestor(left)) {
@@ -829,7 +961,7 @@ export class GAPDefinitionResolver {
             });
         }
         events.push(...this.collectGapSymbolEvents(rootNode));
-        return { events, scopeByStart };
+        return { events, scopeByStart, calls };
     }
 
     /** Collect global declaration and installation calls from the AST. */
@@ -981,6 +1113,7 @@ export class GAPDefinitionResolver {
             document,
             events: model.events.filter(event => event.kind === 'read' || event.scope === GLOBAL_SCOPE),
             lines: model.lines,
+            calls: model.calls,
         } : null;
     }
 }

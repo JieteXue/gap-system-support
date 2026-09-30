@@ -1,8 +1,8 @@
 {
   "name": "gap-system-support",
   "displayName": "GAP System Support",
-  "description": "Intelligent code editing powered by tree-sitter-gap, GAP code running, a help system, and language model tools for GAP",
-  "version": "0.4.1",
+  "description": "Intelligent code editing powered by tree-sitter-gap, GAP code running, a help system, and language model tools",
+  "version": "0.4.2",
   "publisher": "flianlee",
   "author": "Songtai Li",
   "license": "SEE LICENSE IN LICENSE",
@@ -146,6 +146,16 @@
         "category": "GAP"
       },
       {
+        "command": "gap.inspectDefinition",
+        "title": "Show Definition Panel",
+        "category": "GAP",
+        "icon": {
+          "light": "icon/definition-light.svg",
+          "dark": "icon/definition-dark.svg"
+        },
+        "enablement": "editorLangId == gap"
+      },
+      {
         "command": "gap.rebuildHelpIndex",
         "title": "Rebuild Help Index",
         "category": "GAP"
@@ -202,6 +212,11 @@
       ],
       "editor/title": [
         {
+          "command": "gap.inspectDefinition",
+          "when": "resourceLangId == gap",
+          "group": "navigation@2"
+        },
+        {
           "command": "gap.runFile",
           "when": "resourceLangId == gap && resourceScheme != untitled",
           "group": "navigation"
@@ -225,6 +240,11 @@
         }
       ],
       "gap.contextMenu": [
+        {
+          "command": "gap.inspectDefinition",
+          "when": "resourceLangId == gap",
+          "group": "0_navigation@1"
+        },
         {
           "command": "gap.configureFlags",
           "group": "1_run@1"
@@ -256,9 +276,13 @@
           {
             "id": "addGapToPath",
             "title": "Add GAP to the PATH",
+            "description": "Make sure GAP is installed and added to the system PATH.\n[Open README](command:gap.openReadme)",
             "media": {
               "markdown": "media/install-gap.md"
-            }
+            },
+            "completionEvents": [
+              "onCommand:gap.openReadme"
+            ]
           },
           {
             "id": "setDocPath",
@@ -500,6 +524,7 @@
     "test": "node test/run-all.js"
   },
   "dependencies": {
+    "@vscode/codicons": "0.0.46-24",
     "web-tree-sitter": "^0.24.6"
   },
   "devDependencies": {

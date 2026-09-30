@@ -4,6 +4,62 @@ The extension provides lightweight static information when the pointer rests on
 a GAP token. It does not execute GAP code and does not infer the runtime type
 of a value.
 
+## Definition Panel
+
+Click the editor-title symbol icon, **Show definition panel** in a symbol's
+native Hover, or run **GAP: Show Definition Panel**. A read-only editor pane
+opens to the right without taking focus from the source editor. It follows
+the editor's insertion cursor/selection, not mouse movement over source text.
+The Hover link initially shows the hovered occurrence even if the insertion
+cursor is elsewhere; subsequent cursor moves resume normal following.
+
+The pane uses the same static resolver as native Hover. Complete definitions
+retain their original whitespace and receive Tree-sitter syntax highlighting.
+The code gutter shows original source line numbers and stays visible while
+scrolling horizontally. Two-column indentation guides continue through blank
+lines within the same indentation. Selecting and copying code excludes the
+gutter and preserves its original source text and line endings.
+It also shows comments, category, and a source link. Multiple possible origins
+have a chooser; built-ins show their signature/help summary and link to GAP Help.
+Click a highlighted identifier to go to its definition (Enter works with
+keyboard focus). Several origins use a picker instead of silently choosing one.
+The reference icon uses the existing reference provider and native Peek.
+Unresolvable positions show no definition while retaining useful source context.
+
+The **GAP Info** pane has independently collapsible sections:
+
+- **Definition**: the complete highlighted definition and documentation.
+- **Local Context**: the nearest function and visible parameters/local bindings.
+  Click a binding to reach its latest preceding source assignment or declaration.
+  Nested shadowing and captured outer bindings follow the resolver's lexical
+  model; later assignments and record fields are not local bindings.
+- **Messages**: diagnostics spanning the current cursor line.
+- **All Messages**: up to 200 nearby diagnostics from the source file, with the
+  full count in the heading. Click a message to reach its source location.
+
+This borrows the contextual sections and pause/resume interaction of Lean's
+Infoview without pretending GAP has proof goals, expected types, or statically
+known runtime values. Local entries are source bindings, not evaluated values.
+Diagnostics come from VS Code's published diagnostics, including the extension's
+syntax checker; the pane does not run a second syntax validation.
+
+Updates are debounced by 140 ms. Unsaved edits and workspace file changes
+invalidate cached results and re-resolve the current editor cursor. Focusing
+the panel preserves its contents; switching to a non-GAP editor clears them.
+The pause icon freezes the displayed occurrence; resume follows the latest
+cursor. Refresh while paused re-resolves the held occurrence if its text has
+not changed. If edited text makes the old offset unsafe, refresh uses the
+current source-editor cursor instead. Changed paused sources are visibly stale
+and cannot navigate using old offsets.
+
+Loading preserves the previous layout while disabling obsolete actions.
+Unchanged sections retain their DOM, expanded/collapsed state, selected text,
+and code scroll position. File changes and asynchronous reference results are
+checked against the current session/revision before navigation.
+
+Closing it releases its listeners, file watcher, pending update, and previews.
+There are no recursive layers, pin actions, or independent navigation history.
+
 ## Aliases And Returned Fields
 
 Suppose a workspace source file defines `MagneticEquivalence.Compare` as a
@@ -28,6 +84,27 @@ If the function returns statically traceable records, Hover on `equivalent`,
 Tracing can follow wrapper returns, passed parameters, local assignments,
 and list elements inserted with `Add`. Multiple return paths may produce
 multiple field definitions; no claim is made that every path has the field.
+
+Fields can also be resolved while hovering inside a callee, for example:
+
+```gap
+Split := function(group, character)
+  local generators;
+  generators := character.generators;
+  return generators;
+end;
+
+for character in enumeration.characters do
+  Split(group, character);
+od;
+```
+
+When `enumeration.characters` has traceable record elements, the right-hand
+`generators` resolves through the loop element and the call argument to its
+producing record field. Wrapper calls and global callable aliases are followed;
+callee identities distinguish unrelated same-named functions. Multiple known
+inputs remain alternatives, and a parameter with no recognizable callers is
+left unresolved instead of guessing a same-named field.
 
 Source delimiters determine the displayed definition, not a one-line preview
 or a search for the next `end` in the text. Hover preserves nested bodies and
@@ -66,7 +143,16 @@ Built-in functions are recognized from three sources:
 1. The generated completion data.
 2. A small list of kernel-level names that GAP does not expose through the
    ordinary global-function enumeration.
-3. The GAP help index.
+3. Function-typed entries (`F`) in the GAP help index.
+
+Code identifiers are matched case-sensitively: `group`, `Group`, and `GROUP` are
+different names. Help search normalization is never used to classify code
+symbols. Help entries with signatures retain the original identifier spelling;
+documentation search itself still supports its usual normalized queries.
+Untyped help topics do not prove a function exists: for example, the bundled
+package documentation includes a lowercase `group` prose topic. Such entries
+can supply documentation for an independently known function, but cannot turn
+a parameter or variable into a built-in function.
 
 Their Hover contains the function name, a short documentation paragraph when
 the matching help file is available, the help book, and a command link to the
@@ -129,7 +215,7 @@ resolved reliably without running GAP.
 
 Hover requests use:
 
-- a lazily built index of help entries by normalized function name;
+- a lazily built index of help entries by exact-case function name;
 - an LRU cache for extracted documentation summaries;
 - document models and read-file caches shared with definition/reference navigation;
 - one short-lived symbol index per workspace and cursor-sensitive alias histories;
@@ -137,6 +223,11 @@ Hover requests use:
 
 This keeps pointer movement from repeatedly scanning the complete help index or
 reparsing the same source files.
+
+The information pane also shares a bounded cache of definition excerpts and
+highlight tokens across occurrences and aliases. See
+[Definition Panel Design](definition-panel.md) for architecture, lifecycle,
+limits, and the VS Code acceptance checklist.
 
 See [Navigation Performance](navigation.md#performance) for cache invalidation,
 capacity limits, and syntax-tree lifetime handling.

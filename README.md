@@ -13,6 +13,7 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
 - **Semantic highlighting and syntax diagnostics**: based on `tree-sitter-gap`.
 - **Code completion**: provides completion for GAP constants, keywords, statement structures, and GAP functions (including functions from other GAP files loaded via `Read`).
 - **Hover information**: hovering over a symbol shows its static category, such as `function`, `variable`, `parameter`, or `record field`, and its complete source definition when available. Each segment of a qualified path has its own Hover. Built-in functions show their signature, a short documentation summary when the GAP documentation is configured, and a link to GAP Help. Language keywords, operators, and the `;` statement terminator show syntax-highlighted snippets with concise descriptions.
+- **GAP Info pane**: open a pane to the right with the editor-title icon, the Hover's **Show definition panel** link, or **GAP: Show Definition Panel**. It follows the editor cursor with highlighted definitions, lexical locals, and current/file diagnostics in collapsible sections. Click names or messages to navigate; inspect references in native Peek, choose alternate origins, or pause/resume following. Unchanged content retains its scroll position. No recursive tooltips or GAP execution.
 - **Definition navigation**: native Go to Definition and Peek Definition support for statically recognizable user-defined GAP symbols, including cross-file global aliases and statically traced fields of returned records.
 - **Reference navigation**: `Command+click` on macOS or `Ctrl+click` on Windows/Linux opens the native Peek view when a definition has references. Native Find All References (`Shift+F12`) is also supported. The selected occurrence is omitted; definitions without references jump directly to themselves.
 - **Running GAP code**: runs the current GAP file in the VS Code integrated terminal, with configurable GAP command line options.
@@ -21,6 +22,11 @@ This extension provides intelligent code editing powered by [tree-sitter-gap](ht
   - **substring**: same behavior as `??topic` in GAP
 - **Documentation viewer**: search results are displayed in a webview panel.
 - **Language model tools**: GAP help lookup and syntax checking tools that agents can automatically invoke in chat.
+
+See [Hover Information](docs/hover-information.md) and
+[Definition Panel Design](docs/definition-panel.md) for details, limits, and a
+VS Code acceptance checklist. Code symbol matching is case-sensitive (`group`
+is not `Group`).
 
 ## Getting Started
 
@@ -99,7 +105,7 @@ Same behavior as `?topic` and `??topic` in GAP, and the demo shows `AllSmallGrou
 ## Settings
 
 | Setting | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `gap.docPath` | `""` | Manually enter the absolute path of the `doc/` directory |
 | `gap.pkgPath` | `""` | Manually enter the absolute path of the `pkg/` directory |
 | `gap.docAppearance` | `system` | Documentation appearance: `system` follows the VS Code theme, `dark` / `light` use a dark or light theme |
@@ -114,7 +120,7 @@ Same behavior as `?topic` and `??topic` in GAP, and the demo shows `AllSmallGrou
 Press `Ctrl+Shift+P` or `F1` to open the Command Palette and use the following commands:
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `GAP: Run GAP File` | Available when a GAP file is open; run the current GAP file in a terminal |
 | `GAP: Configure GAP Command Line Options` | Configure GAP command line options through Quick Pick |
 | `GAP: Search GAP Help` | Search GAP help documentation |
@@ -159,6 +165,7 @@ Then press `F5` to start debugging.
 
 - Syntax highlighting is implemented based on the [tree-sitter-gap](https://github.com/gap-system/tree-sitter-gap) query files.
 - The extension icon is from [gap-logo](https://github.com/gap-system/gap-logo).
+- Thanks to [@JieteXue](https://github.com/JieteXue) for contributing to this project, and to everyone who has supported its development.
 
 ## Third Party Notices
 

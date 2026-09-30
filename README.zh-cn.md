@@ -13,6 +13,7 @@
 - **语义高亮与语法诊断**：基于 `tree-sitter-gap`。
 - **代码补全**：提供 GAP 常量、关键字、语句结构和 GAP 函数的补全（包括通过 `Read` 加载的其他 GAP 文件中的函数）。
 - **悬停信息**：将鼠标悬停在符号上时，会显示其静态类别，例如 `function`、`variable`、`parameter` 或 `record field`，并在可解析时显示完整的源代码定义。限定路径的各个名称分别显示自己的 Hover。内置函数会显示函数签名；配置 GAP 文档路径后，还会显示简短的文档摘要和 GAP 帮助链接。关键字、运算符和语句终止符 `;` 会在 Hover 中以语法高亮代码片段显示，并附带简短说明。
+- **GAP Info 信息栏**：点击编辑器右上角图标、Hover 中的 **Show definition panel** 链接，或执行 **GAP: Show Definition Panel**，在右侧打开信息栏。面板跟随光标，在可折叠分区显示高亮定义、局部绑定、当前行及整个文件的诊断。点击名称或消息跳回源码，也可查看原生 Peek 引用、选择其他来源、暂停或恢复跟随。不变的内容保留滚动位置，不使用递归弹层，不执行 GAP。
 - **定义导航**：为可静态识别的 GAP 自定义符号提供 VS Code 原生的转到定义与 Peek Definition，包括跨文件全局别名，以及通过静态追踪得到的函数返回记录字段。
 - **引用导航**：在 macOS 上使用 `Command+点击`，在 Windows/Linux 上使用 `Ctrl+点击`；有引用的定义会打开原生 Peek，也可使用原生的查找所有引用（`Shift+F12`）。结果不包含当前点击的这一条，没有引用时直接跳转到定义自身。
 - **运行 GAP 代码**：在 VS Code 集成终端中运行当前 GAP 文件，并支持配置 GAP 命令行选项。
@@ -21,6 +22,10 @@
   - **substring**：对应 GAP 中的 `??topic`
 - **帮助文档浏览**：搜索结果会在 Webview 面板中展示。
 - **语言模型工具**：为对话中的 agents 提供 GAP 帮助查询与语法检查工具。
+
+详细行为、限制和 VS Code 实测清单见
+[Hover 信息](docs/hover-information.md)与[信息栏设计](docs/definition-panel.md)。
+代码符号严格区分大小写，`group` 不会被当作内置函数 `Group`。
 
 ## 快速开始
 
@@ -99,7 +104,7 @@ source ~/.bashrc
 ## 设置项
 
 | 设置项 | 默认值 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `gap.docPath` | `""` | 手动填写 `doc/` 目录绝对路径 |
 | `gap.pkgPath` | `""` | 手动填写 `pkg/` 目录绝对路径 |
 | `gap.docAppearance` | `system` | 文档外观，`system` 跟随 VS Code 主题，`dark` / `light` 使用深色或浅色主题 |
@@ -114,7 +119,7 @@ source ~/.bashrc
 按 `Ctrl+Shift+P` 或 `F1` 打开命令面板，即可使用以下命令：
 
 | 命令 | 说明 |
-|---|---|
+| --- | --- |
 | `GAP: Run GAP File` | 当打开 GAP 文件时可用，在终端中运行当前 GAP 文件 |
 | `GAP: Configure GAP Command Line Options` | 通过 Quick Pick 配置 GAP 命令行选项 |
 | `GAP: Search GAP Help` | 搜索 GAP 帮助文档 |
@@ -158,6 +163,7 @@ npx @vscode/vsce package
 
 - 语法高亮基于 [tree-sitter-gap](https://github.com/gap-system/tree-sitter-gap) 的查询文件实现。
 - 扩展图标来自 [gap-logo](https://github.com/gap-system/gap-logo)。
+- 感谢 [@JieteXue](https://github.com/JieteXue) 对本项目的贡献，以及所有支持本项目开发的人。
 
 ## 第三方声明
 

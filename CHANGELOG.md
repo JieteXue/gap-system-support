@@ -1,4 +1,13 @@
+# Changelog
+
 ## Unreleased
+
+1. Resolve fields of function parameters from statically recognizable workspace callers, including wrapper calls and `for` list element bindings; match callee definition identities to exclude unrelated functions
+2. Add a cursor-following, syntax-highlighted definition panel to the right, opened from the editor-title icon, native Hover, or the command palette; refresh unsaved edits and imported origins without recursive tooltip layers
+3. Make the pane contextual and interactive with lexical locals, clickable definition tokens, native reference Peek, published diagnostics, collapsible sections, pause/resume, and stable content during cursor updates
+4. Add source line numbers, a sticky code gutter, and indentation guides to the information pane; preserve syntax spans, navigation identities, and copied source text
+5. Match built-in help symbols case-sensitively and reject untyped prose topics as function evidence, so parameters such as `group` are not mistaken for built-ins; keep normalized documentation search independent
+6. Reuse definition highlighting across occurrences and aliases, reject stale asynchronous source navigation, and isolate reopened pane sessions
 
 ## 0.4.1 - 2026-09-30
 
@@ -14,6 +23,8 @@
 3. Add static Hover categories, built-in help summaries, language keyword/operator/punctuation descriptions, cross-file guarded lookup, and syntax-highlighted GAP snippets
 4. Cache parsed files, workspace symbol/reference indexes, help lookups, and documentation summaries to keep repeated editor requests responsive
 
+Special thanks to [@JieteXue](https://github.com/JieteXue) for contributing these features.
+
 ## 0.3.5
 
 1. Add GAP syntax checking tool and integrate with diagnostics
@@ -26,6 +37,7 @@
 1. Add Go to Definition and Peek Definition support through VS Code's DefinitionProvider API
 
 ## 0.3.3
+
 1. Update `README.md` and `README.zh-cn.md`
 
 ## 0.3.2

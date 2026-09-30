@@ -53,9 +53,12 @@ const unitTests = [
     'chooser.test.js',
     path.join('..', 'diagnostics', 'diagnostics.test.js'),
     path.join('..', 'hover', 'hover.test.js'),
+    path.join('..', 'hover', 'inspection.test.js'),
+    path.join('..', 'hover', 'definitionLines.test.js'),
     path.join('..', 'definition', 'definition.test.js'),
     path.join('..', 'definition', 'returnValues.test.js'),
     path.join('..', 'definition', 'resolverCache.test.js'),
+    path.join('..', 'definition', 'parameterFields.test.js'),
     path.join('..', 'references', 'references.test.js'),
 ];
 for (const file of unitTests) {

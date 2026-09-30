@@ -10,7 +10,7 @@ import { GAPFoldsProvider } from './folds/foldsProvider';
 import { GAPDiagnosticsProvider } from './diagnostics/diagnosticsProvider';
 import { ensureData, generateData, resetData } from './completion/dataManager';
 import { GAPCompletionProvider } from './completion/completionProvider';
-import { GAPHoverProvider } from './hover/hoverProvider';
+import { GAPDefinitionInspector } from './hover/definitionInspector';
 import { GAPDefinitionResolver } from './hover/definitionResolver';
 import { GAPDefinitionProvider } from './definition/definitionProvider';
 import { GAPReferenceProvider } from './references/referenceProvider';
@@ -276,12 +276,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Register the hover provider.
     const definitionResolver = new GAPDefinitionResolver(completionPath);
+    const definitionInspector = new GAPDefinitionInspector(context, definitionResolver, completionPath);
+    context.subscriptions.push(definitionInspector);
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
         if (event.document.languageId === 'gap' && event.contentChanges.length > 0) {
             definitionResolver.onWorkspaceFilesChanged();
+            definitionInspector.invalidate();
         }
     }));
-    const hoverProvider = new GAPHoverProvider(completionPath, definitionResolver);
+    const hoverProvider = definitionInspector.hoverProvider;
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(
             { language: 'gap' },
@@ -332,15 +335,19 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(() => {
             referenceProvider.onWorkspaceFilesChanged();
+            definitionInspector.invalidate();
         }),
         vscode.workspace.onDidCreateFiles(() => {
             referenceProvider.onWorkspaceFilesChanged();
+            definitionInspector.invalidate();
         }),
         vscode.workspace.onDidDeleteFiles(() => {
             referenceProvider.onWorkspaceFilesChanged();
+            definitionInspector.invalidate();
         }),
         vscode.workspace.onDidRenameFiles(() => {
             referenceProvider.onWorkspaceFilesChanged();
+            definitionInspector.invalidate();
         }),
     );
     // Enable/disable diagnostics when the gap.diagnostics setting changes.
@@ -359,6 +366,7 @@ export async function activate(context: vscode.ExtensionContext) {
             semanticProvider.onDocumentClosed(doc.uri);
             completionProvider.onDocumentClosed(doc.uri);
             referenceProvider.onDocumentClosed(doc.uri);
+            definitionInspector.invalidate();
             diagnosticsProvider.onDocumentClosed(doc.uri);
         }),
     );

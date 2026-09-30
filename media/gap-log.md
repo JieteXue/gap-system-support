@@ -1,1 +1,3 @@
-<img src="../icon/logo.svg" alt="GAP logo" width="60%" />
+<div align="center">
+<img src="../icon/icon.png" alt="GAP logo" width="70%" />
+</div>

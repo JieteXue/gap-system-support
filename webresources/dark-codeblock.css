@@ -1,5 +1,5 @@
-/* Dark mode polish for code blocks and function blocks.
-   This file follows the VS Code Markdown preview style.
+/* Dark mode colors for code blocks and function blocks.
+   Fonts and spacing follow GAP's manual.css.
    It is injected after gap-dark.css or appearance-dark.css. */
 
 /* Example code blocks use a soft dark background and light text. */
@@ -7,13 +7,7 @@ pre,
 pre.normal {
   background: #252526;
   color: #d4d4d4;
-  border: 1px solid #3c3c3c;
-  border-radius: 3px;
-  padding: 16px;
   overflow: auto;
-  font-family: var(--vscode-editor-font-family, "Courier New", Courier, monospace);
-  font-size: var(--vscode-editor-font-size, 100%);
-  line-height: 1.5;
 }
 
 /* Code inside pre keeps no extra background or border. */
@@ -42,9 +36,6 @@ table.example th {
 div.func {
   background: #2d2d30;
   color: #d4d4d4;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  padding: 4px 8px;
 }
 
 div.func table.func {
