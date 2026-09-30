@@ -42,8 +42,11 @@ Circular alias chains terminate without executing GAP.
 - Fields of `result := Function(...)` when the function returns `rec(...)`
 - Multiple return paths, preserving each field's source location
 - Forwarding functions and parameters passed through wrappers
+- Fields used inside named function bodies, inferred from known workspace
+  call arguments rather than requiring a result variable at the cursor
 - Nested fields reached through local assignments and returned records
 - List element origins from list literals, indexing, and `Add(list, value)`
+- Element bindings inside `for element in list do ... od` bodies
 - Hover and Go to Definition share the same field origins; references can
   connect the returned field to differently named result variables
 
@@ -52,6 +55,12 @@ List elements are treated as possible alternatives, not evaluated by index.
 Conditional mutations, arbitrary list transformations, closures, dynamically
 selected functions, and fields created only at runtime may remain unresolved.
 Field availability on every return path is not guaranteed.
+Parameter-field origins are possible input alternatives from recognizable
+callers, not a declared parameter type. Callees are matched by definition
+location, including global aliases, to avoid mixing same-named functions or
+shadowed locals. Missing, unknown, and recursive-only arguments provide no
+guaranteed origin. Higher-order calls and callers outside the workspace may
+remain unresolved.
 
 ## GAP Declaration APIs
 

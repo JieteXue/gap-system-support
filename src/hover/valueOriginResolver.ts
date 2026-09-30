@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import type { SyntaxNode, Tree } from 'web-tree-sitter';
 import { hasErrorAncestor } from '../shared/treeUtils';
-import { symbolNameNodeAt } from '../shared/functionName';
+import { symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
 import { definitionText } from '../shared/definitionText';
 import { VALUE_ORIGIN_MAX_DEPTH, VALUE_ORIGIN_MAX_STEPS } from '../limits';
 import type { ResolvedDefinition } from './definitionResolver';
@@ -13,6 +13,12 @@ export interface ValueSource {
     tree: Tree;
     lines: string[];
     offsetAt: (position: vscode.Position) => number;
+}
+
+export interface ValueCallSite {
+    name: string;
+    filePath: string;
+    offset: number;
 }
 
 interface ScopeIndex {
@@ -40,6 +46,13 @@ interface Context {
 type FindDefinitions = (
     document: vscode.TextDocument, position: vscode.Position, name: string,
 ) => ResolvedDefinition[];
+
+interface ValueOriginServices {
+    findDefinitions: FindDefinitions;
+    findCallDefinitions: FindDefinitions;
+    loadSource: (filePath: string) => ValueSource | null;
+    findCallSites: (name: string, document: vscode.TextDocument) => ValueCallSite[];
+}
 
 function isFunction(node: SyntaxNode): boolean {
     return ['function', 'atomic_function', 'lambda'].includes(node.type);
@@ -74,6 +87,12 @@ function appendNode(index: Map<string, SyntaxNode[]>, name: string, node: Syntax
     else index.set(name, [node]);
 }
 
+function parameterName(node: SyntaxNode): string {
+    return node.type === 'qualified_identifier'
+        ? node.namedChildren.find(child => child.type === 'identifier')?.text ?? node.text
+        : node.text;
+}
+
 /** Nodes are collected in source order; only completed statements are visible. */
 function precedingCount(nodes: SyntaxNode[], offset: number): number {
     let low = 0;
@@ -90,8 +109,7 @@ export function resolveValueFieldDefinitions(
     document: vscode.TextDocument,
     position: vscode.Position,
     name: string,
-    findDefinitions: FindDefinitions,
-    loadSource: (filePath: string) => ValueSource | null,
+    services: ValueOriginServices,
 ): ResolvedDefinition[] {
     const parts = name.split('.');
     if (parts.length < 2 || !parts.every(part => /^[A-Za-z_][A-Za-z_0-9]*$/.test(part))) return [];
@@ -99,13 +117,15 @@ export function resolveValueFieldDefinitions(
     const ownedTrees: Tree[] = [];
     const active = new Set<string>();
     const definitionCache = new Map<string, ResolvedDefinition[]>();
+    const callDefinitionCache = new Map<string, ResolvedDefinition[]>();
+    const callSiteCache = new Map<string, ValueCallSite[]>();
     let steps = 0;
 
     const sourceFor = (filePath: string): Source | null => {
         const key = filePath || document.uri.toString();
         const cached = sources.get(key);
         if (cached) return cached;
-        const loaded = loadSource(filePath);
+        const loaded = services.loadSource(filePath);
         if (!loaded) return null;
         // A cheap tree copy pins native nodes while nested lookups evict parser entries.
         const tree = loaded.tree.copy();
@@ -115,13 +135,17 @@ export function resolveValueFieldDefinitions(
         return source;
     };
 
-    const definitionsFor = (source: Source, node: SyntaxNode, lookupName: string): ResolvedDefinition[] => {
+    const definitionsFor = (
+        source: Source, node: SyntaxNode, lookupName: string, caller = false,
+    ): ResolvedDefinition[] => {
         const key = `${source.document.uri.toString()}:${node.startIndex}:${lookupName}`;
-        const cached = definitionCache.get(key);
+        const cache = caller ? callDefinitionCache : definitionCache;
+        const cached = cache.get(key);
         if (cached) return cached;
-        const definitions = findDefinitions(source.document,
+        const find = caller ? services.findCallDefinitions : services.findDefinitions;
+        const definitions = find(source.document,
             new vscode.Position(node.startPosition.row, node.startPosition.column), lookupName);
-        definitionCache.set(key, definitions);
+        cache.set(key, definitions);
         return definitions;
     };
 
@@ -132,7 +156,7 @@ export function resolveValueFieldDefinitions(
             assignments: new Map(), additions: new Map(), returns: [], locals: new Set(),
         };
         for (const declaration of [scope.childForFieldName('parameters'), scope.childForFieldName('locals')]) {
-            for (const child of declaration?.namedChildren ?? []) index.locals.add(child.text);
+            for (const child of declaration?.namedChildren ?? []) index.locals.add(parameterName(child));
         }
         visitScope(scope, node => {
             if (node.type === 'assignment_statement') {
@@ -148,6 +172,45 @@ export function resolveValueFieldDefinitions(
         });
         source.scopes.set(scope.startIndex, index);
         return index;
+    };
+
+    const parameterOrigins = (
+        source: Source, fn: SyntaxNode, parameter: string, fields: string[], depth: number,
+    ): ResolvedDefinition[] => {
+        const parameterIndex = fn.childForFieldName('parameters')?.namedChildren
+            .findIndex(node => parameterName(node) === parameter) ?? -1;
+        const left = fn.parent?.childForFieldName('right')?.id === fn.id
+            ? fn.parent.childForFieldName('left') : null;
+        const declaration = left?.type === 'record_selector' ? left.childForFieldName('selector') : left;
+        if (parameterIndex < 0 || !declaration || declaration.type !== 'identifier') return [];
+        const lookupName = symbolLookupName(declaration);
+        const filePath = source.document.isUntitled ? '' : source.document.uri.fsPath;
+        const cacheKey = `${source.document.uri.toString()}:${lookupName}`;
+        let sites = callSiteCache.get(cacheKey);
+        if (!sites) {
+            sites = services.findCallSites(lookupName, source.document);
+            callSiteCache.set(cacheKey, sites);
+        }
+        const result: ResolvedDefinition[] = [];
+        for (const site of sites) {
+            if (++steps > VALUE_ORIGIN_MAX_STEPS) break;
+            const caller = sourceFor(site.filePath);
+            if (!caller) continue;
+            let call: SyntaxNode | null = caller.tree.rootNode.descendantForIndex(site.offset);
+            while (call && call.type !== 'call') call = call.parent;
+            const callee = call?.childForFieldName('function');
+            const argument = call?.childForFieldName('arguments')?.namedChildren[parameterIndex];
+            if (!callee || !argument) continue;
+            const matches = definitionsFor(caller, callee, callee.text, true).some(definition =>
+                definition.filePath === filePath &&
+                definition.row === declaration.startPosition.row &&
+                definition.column === declaration.startPosition.column);
+            if (!matches) continue;
+            result.push(...trace({
+                node: argument, context: { source: caller, bindings: new Map() },
+            }, fields, depth + 1));
+        }
+        return result;
     };
 
     const fieldDefinition = (node: SyntaxNode, context: Context): ResolvedDefinition => {
@@ -226,10 +289,23 @@ export function resolveValueFieldDefinitions(
                         follow(call.childForFieldName('arguments')?.namedChildren[1], fields.slice(1)));
                 }
                 const assignment = assignments[precedingCount(assignments, node.startIndex) - 1];
+                // A loop binding replaces earlier assignments, but not assignments in its body.
+                let loop = node.parent;
+                while (loop && loop.id !== scope.id) {
+                    if (loop.type === 'for_statement' &&
+                        loop.childForFieldName('identifier')?.text === node.text &&
+                        node.startIndex > (loop.childForFieldName('values')?.endIndex ?? Infinity)) break;
+                    loop = loop.parent;
+                }
+                if (loop?.type === 'for_statement' && (!assignment || assignment.startIndex < loop.startIndex)) {
+                    return follow(loop.childForFieldName('values'), ['[]', ...fields]);
+                }
                 if (assignment) return follow(assignment.childForFieldName('right'));
                 const binding = context.bindings.get(node.text);
                 if (binding) return trace(binding, fields, depth + 1);
-                if (isFunction(scope) && index.locals.has(node.text)) return [];
+                if (isFunction(scope) && index.locals.has(node.text)) {
+                    return parameterOrigins(context.source, scope, node.text, fields, depth);
+                }
                 return definitionsFor(context.source, node, node.text)
                     .flatMap(definition => {
                         const source = sourceFor(definition.filePath);
@@ -254,7 +330,7 @@ export function resolveValueFieldDefinitions(
                         if (!fn || !isFunction(fn)) return [];
                         const bindings = new Map<string, Expression>();
                         fn.childForFieldName('parameters')?.namedChildren.forEach((parameter, index) => {
-                            if (args[index]) bindings.set(parameter.text, { node: args[index], context });
+                            if (args[index]) bindings.set(parameterName(parameter), { node: args[index], context });
                         });
                         return scopeIndex(source, fn).returns.flatMap(value =>
                             follow(value, fields, { source, bindings }));

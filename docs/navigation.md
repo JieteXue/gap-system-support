@@ -79,8 +79,8 @@ Each document model contains source lines, line offsets, scalar definition
 events, and lexical scope offsets. Unchanged models remain reusable even when
 the parser evicts and recreates their native syntax trees.
 
-Workspace fallback builds one symbol index per workspace, not one scan per
-symbol name. Indexes expire after five seconds and are invalidated on text
+Workspace fallback builds one symbol and call-site index per workspace, not
+one scan per symbol name. Indexes expire after five seconds and are invalidated on text
 edits, saves, file creation/deletion/renaming, and document closure. Current-file
 exclusion happens at lookup time so the same index serves different documents.
 Global alias bindings are indexed as cursor-sensitive histories, including
@@ -99,6 +99,11 @@ syntax trees to keep recursive cross-file nodes valid during parser eviction
 and releases those copies when the request ends. Providers retain scalar
 cursor context before resolution so their ranges do not depend on an evicted
 tree.
+
+Parameter-field tracing uses the same cached call-site index to follow possible
+arguments back through callers. Candidates are narrowed by callee leaf or
+global alias name, then checked against the function's definition identity.
+Reverse caller traversal shares the normal recursion and expression-work limits.
 
 Limits in `src/limits.ts` bound document size, cache sizes, and scanned content.
 When a limit is reached, the provider returns no static result rather than

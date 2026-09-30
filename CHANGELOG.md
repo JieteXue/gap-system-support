@@ -1,5 +1,7 @@
 ## Unreleased
 
+1. Resolve fields of function parameters from statically recognizable workspace callers, including wrapper calls and `for` list element bindings; match callee definition identities to exclude unrelated functions
+
 ## 0.4.1 - 2026-09-30
 
 1. Resolve global aliases such as `ME := MagneticEquivalence` across source files, with segment-specific Hover and reverse references through renamed roots

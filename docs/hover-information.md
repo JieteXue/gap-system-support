@@ -29,6 +29,27 @@ Tracing can follow wrapper returns, passed parameters, local assignments,
 and list elements inserted with `Add`. Multiple return paths may produce
 multiple field definitions; no claim is made that every path has the field.
 
+Fields can also be resolved while hovering inside a callee, for example:
+
+```gap
+Split := function(group, character)
+  local generators;
+  generators := character.generators;
+  return generators;
+end;
+
+for character in enumeration.characters do
+  Split(group, character);
+od;
+```
+
+When `enumeration.characters` has traceable record elements, the right-hand
+`generators` resolves through the loop element and the call argument to its
+producing record field. Wrapper calls and global callable aliases are followed;
+callee identities distinguish unrelated same-named functions. Multiple known
+inputs remain alternatives, and a parameter with no recognizable callers is
+left unresolved instead of guessing a same-named field.
+
 Source delimiters determine the displayed definition, not a one-line preview
 or a search for the next `end` in the text. Hover preserves nested bodies and
 quoted delimiters, while a record field excludes adjacent fields.

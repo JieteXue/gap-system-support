@@ -11,7 +11,7 @@ import { LazyQuery } from '../shared/lazyQuery';
 import { recordEntryLookupName } from '../shared/functionName';
 import { definitionText } from '../shared/definitionText';
 import { resolveValueFieldDefinitions } from './valueOriginResolver';
-import type { ValueSource } from './valueOriginResolver';
+import type { ValueCallSite, ValueSource } from './valueOriginResolver';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
 import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT, WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES } from '../limits';
 
@@ -57,6 +57,7 @@ interface EventFile {
     /** Source lines without trailing line breaks. */
     lines: string[];
     document: vscode.TextDocument;
+    calls: { name: string; offset: number }[];
 }
 
 interface DocumentModel extends EventFile {
@@ -107,9 +108,15 @@ export interface ResolvedDefinition {
     symbolKind?: DefinitionSymbolKind;
 }
 
-interface WorkspaceSymbolCacheEntry {
-    expiresAt: number;
+interface WorkspaceSymbolIndex {
     symbols: Map<string, DefinitionCandidate[]>;
+    calls: Map<string, ValueCallSite[]>;
+    unqualifiedCalls: ValueCallSite[];
+    aliasRoots: Set<string>;
+}
+
+interface WorkspaceSymbolCacheEntry extends WorkspaceSymbolIndex {
+    expiresAt: number;
 }
 
 export class GAPDefinitionResolver {
@@ -165,6 +172,7 @@ export class GAPDefinitionResolver {
             document, text, lines, lineOffsets, tree, version: document.version,
             events: collected.events.sort((a, b) => a.offset - b.offset),
             scopeByStart: collected.scopeByStart,
+            calls: collected.calls,
         };
         this.documentCache.set(key, model);
         return model;
@@ -338,9 +346,15 @@ export class GAPDefinitionResolver {
         if (this.resolvingValueFields || !name.includes('.')) return [];
         this.resolvingValueFields = true;
         try {
-            return resolveValueFieldDefinitions(document, position, name,
-                (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName),
-                filePath => this.valueSource(filePath, document));
+            return resolveValueFieldDefinitions(document, position, name, {
+                findDefinitions: (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName),
+                findCallDefinitions: (source, at, lookupName) => {
+                    const lexical = this.resolveDefinition(source, at, lookupName);
+                    return lexical ? [lexical] : this.resolveDefinitions(source, at, lookupName);
+                },
+                loadSource: filePath => this.valueSource(filePath, document),
+                findCallSites: (lookupName, source) => this.valueCallSites(lookupName, source),
+            });
         } finally {
             this.resolvingValueFields = false;
         }
@@ -409,25 +423,57 @@ export class GAPDefinitionResolver {
         name: string,
         currentFilePath: string,
     ): DefinitionCandidate[] {
+        const cached = this.workspaceIndex(baseDir);
+        return (cached.symbols.get(name) ?? []).filter(candidate => candidate.filePath !== currentFilePath);
+    }
+
+    private valueCallSites(name: string, document: vscode.TextDocument): ValueCallSite[] {
+        const leaf = name.split('.').pop()!;
+        const model = this.documentModel(document);
+        const baseDir = resolveReadBaseDir(document);
+        const index = baseDir ? this.workspaceIndex(baseDir) : null;
+        const aliases = new Set([
+            ...(index?.aliasRoots ?? []),
+            ...(model?.aliases?.changes.keys() ?? []),
+        ]);
+        const matches = (callee: string) =>
+            callee.split('.').pop() === leaf || (!callee.includes('.') && aliases.has(callee));
+        const sites = (model?.calls ?? []).filter(call => matches(call.name))
+            .map(call => ({ ...call, filePath: document.isUntitled ? '' : document.uri.fsPath }));
+        if (!index) return sites;
+        const candidates = new Set([
+            ...(index.calls.get(leaf) ?? []),
+            ...index.unqualifiedCalls.filter(site => aliases.has(site.name)),
+        ]);
+        for (const site of candidates) {
+            if (site.filePath !== document.uri.fsPath) sites.push(site);
+        }
+        return sites;
+    }
+
+    private workspaceIndex(baseDir: string): WorkspaceSymbolCacheEntry {
         const now = Date.now();
         let cached = this.workspaceSymbolCache.peek(baseDir);
         if (!cached || cached.expiresAt <= now) {
             cached = {
                 expiresAt: now + WORKSPACE_SYMBOL_CACHE_MS,
-                symbols: this.scanWorkspaceSymbolDefinitions(baseDir),
+                ...this.scanWorkspaceSymbolDefinitions(baseDir),
             };
             this.workspaceSymbolCache.set(baseDir, cached);
         } else {
             this.workspaceSymbolCache.touch(baseDir, cached);
         }
-        return (cached.symbols.get(name) ?? []).filter(candidate => candidate.filePath !== currentFilePath);
+        return cached;
     }
 
     /** Find top-level user definitions in sibling GAP source files. */
     private scanWorkspaceSymbolDefinitions(
         baseDir: string,
-    ): Map<string, DefinitionCandidate[]> {
+    ): WorkspaceSymbolIndex {
         const symbols = new Map<string, DefinitionCandidate[]>();
+        const calls = new Map<string, ValueCallSite[]>();
+        const unqualifiedCalls: ValueCallSite[] = [];
+        const aliasRoots = new Set<string>();
         const visited = new Set<string>();
         const sourceExtensions = new Set(['.g', '.gd', '.gi', '.gap']);
 
@@ -450,7 +496,16 @@ export class GAPDefinitionResolver {
                 visited.add(filePath);
                 const read = this.fileCache.loadFile(filePath);
                 if (!read) continue;
+                for (const call of read.calls) {
+                    const site = { ...call, filePath };
+                    const leaf = call.name.split('.').pop()!;
+                    const bucket = calls.get(leaf);
+                    if (bucket) bucket.push(site);
+                    else calls.set(leaf, [site]);
+                    if (!call.name.includes('.')) unqualifiedCalls.push(site);
+                }
                 for (const event of read.events) {
+                    if (event.kind === 'alias' && event.scope === GLOBAL_SCOPE) aliasRoots.add(event.name);
                     if (event.kind === 'def' && event.scope === GLOBAL_SCOPE) {
                         const candidate = { event, lines: read.lines, filePath };
                         const bucket = symbols.get(event.name);
@@ -462,7 +517,7 @@ export class GAPDefinitionResolver {
         };
 
         visit(baseDir);
-        return symbols;
+        return { symbols, calls, unqualifiedCalls, aliasRoots };
     }
 
     private scanAllSymbolDefinitions(
@@ -673,8 +728,11 @@ export class GAPDefinitionResolver {
     }
 
     /** Collect definition and Read events plus the scope index for one parsed file. */
-    private collectEvents(rootNode: SyntaxNode): { events: FileEvent[]; scopeByStart: Set<number> } {
+    private collectEvents(rootNode: SyntaxNode): {
+        events: FileEvent[]; scopeByStart: Set<number>; calls: { name: string; offset: number }[];
+    } {
         const events: FileEvent[] = [];
+        const calls: { name: string; offset: number }[] = [];
         // Scope nodes of this file, from the shared completion.scm capture.
         const scopeByStart = new Set<number>();
         const defNodes = new Map<
@@ -726,6 +784,13 @@ export class GAPDefinitionResolver {
         // Record fields are definitions too. They are intentionally collected
         // from the AST because completion.scm only models lexical variables.
         const collectRecordFields = (node: SyntaxNode): void => {
+            if (node.type === 'call') {
+                const callee = node.childForFieldName('function');
+                if (callee && ['identifier', 'record_selector'].includes(callee.type) &&
+                    !hasErrorAncestor(callee)) {
+                    calls.push({ name: callee.text, offset: node.startIndex });
+                }
+            }
             if (node.type === 'record_entry') {
                 const left = node.childForFieldName('left');
                 if (left?.type === 'identifier' && !hasErrorAncestor(left)) {
@@ -829,7 +894,7 @@ export class GAPDefinitionResolver {
             });
         }
         events.push(...this.collectGapSymbolEvents(rootNode));
-        return { events, scopeByStart };
+        return { events, scopeByStart, calls };
     }
 
     /** Collect global declaration and installation calls from the AST. */
@@ -981,6 +1046,7 @@ export class GAPDefinitionResolver {
             document,
             events: model.events.filter(event => event.kind === 'read' || event.scope === GLOBAL_SCOPE),
             lines: model.lines,
+            calls: model.calls,
         } : null;
     }
 }
