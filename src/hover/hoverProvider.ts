@@ -270,10 +270,12 @@ function getFunctionHelpCandidates(name: string): HelpEntry[] {
     return functionHelpIndex.get(name) ?? [];
 }
 
-function findBuiltinHelp(name: string): BuiltinHelp | undefined {
+function findBuiltinHelp(name: string, knownFunction: boolean): BuiltinHelp | undefined {
     let exact: HelpEntry | undefined;
     let exactScore = -1;
     for (const entry of getFunctionHelpCandidates(name)) {
+        // Untyped GAPDoc entries can be prose topics, not runtime functions.
+        if (!knownFunction && entry.type !== 'F') continue;
         if (entry.type !== 'F' && entry.display !== name) continue;
         const score =
             (entry.display === name ? 4 : 0) +
@@ -411,8 +413,9 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         const isBoundArgument = isIsBoundArgument(node);
         const isSelector = selectorExpression(node).id !== node.id;
         const isCall = isFunctionName || isCallCallee(node);
-        const help = findBuiltinHelp(name);
-        if (getFunctionNames()?.has(name) || BUILTIN_FUNCTION_NAMES.has(name) || help) {
+        const knownFunction = !!getFunctionNames()?.has(name) || BUILTIN_FUNCTION_NAMES.has(name);
+        const help = findBuiltinHelp(name, knownFunction);
+        if (knownFunction || help) {
             return { name, range, definitions: [], symbolType: 'built-in function', builtin: help ?? true, isCall };
         }
         const lookupNames = this.resolver.resolveLookupNames(document, position, name);

@@ -785,10 +785,31 @@ async function main() {
         helpData.getHelpState = () => ({
             entries: [{ ...helpEntries[0], type: '', display: 'Group', key: 'group' }],
         });
-        check('GAPDoc exact-case name without type metadata still resolves', 'built-in function',
-            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'Group([])')).symbolType);
+        check('untyped GAPDoc topic alone cannot prove a built-in function', undefined,
+            provider.resolveSymbol(caseDoc, positionOf(caseCode, 'Group([])')).builtin);
         check('GAPDoc lowercase search key cannot classify code as a built-in', undefined,
             provider.resolveSymbol(caseDoc, positionOf(caseCode, 'group;')).builtin);
+        const { loadIndex } = require('../../../out/help/indexData');
+        const realIndex = loadIndex(path.join(ROOT, 'data', 'helpIndex'));
+        helpData.getHelpState = () => realIndex;
+        dataManager.getFunctionNames = () => new Set(names);
+        const magneticCode = [
+            'MAGNETIC_INTERNAL.SplitTimeCharacter := function(group, character)',
+            '  return group;',
+            'end;',
+        ].join('\n');
+        const magneticDoc = makeDocument('magnetic-parameter.g', magneticCode, null);
+        check('real bundled help index contains the lowercase group prose topic', true,
+            realIndex.entries.some(entry => entry.display === 'group' && entry.type !== 'F'));
+        for (const needle of ['group, character', 'group;']) {
+            const info = provider.resolveSymbol(magneticDoc, positionOf(magneticCode, needle));
+            check(`real help index preserves parameter at ${needle}`, 'parameter', info.symbolType);
+            check(`parameter at ${needle} resolves to its declaration`, 0, info.definitions[0]?.row);
+            check(`parameter at ${needle} has no built-in help action`, undefined, info.builtin);
+        }
+        const realGroup = provider.resolveSymbol(caseDoc, positionOf(caseCode, 'Group([])'));
+        check('generated exact-case function can use untyped GAPDoc documentation', true,
+            !!realGroup.builtin && realGroup.builtin.display === 'Group');
         const isBound = await hoverAt(provider, makeDocument('guard.g', 'if not IsBound(value) then\nfi;\n', null), 'IsBound(');
         check('runtime built-in function hovers without completion data', true,
             textOf(isBound).includes('**built-in function**'));

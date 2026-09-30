@@ -143,12 +143,16 @@ Built-in functions are recognized from three sources:
 1. The generated completion data.
 2. A small list of kernel-level names that GAP does not expose through the
    ordinary global-function enumeration.
-3. The GAP help index.
+3. Function-typed entries (`F`) in the GAP help index.
 
 Code identifiers are matched case-sensitively: `group`, `Group`, and `GROUP` are
 different names. Help search normalization is never used to classify code
 symbols. Help entries with signatures retain the original identifier spelling;
 documentation search itself still supports its usual normalized queries.
+Untyped help topics do not prove a function exists: for example, the bundled
+package documentation includes a lowercase `group` prose topic. Such entries
+can supply documentation for an independently known function, but cannot turn
+a parameter or variable into a built-in function.
 
 Their Hover contains the function name, a short documentation paragraph when
 the matching help file is available, the help book, and a command link to the
