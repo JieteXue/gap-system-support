@@ -553,6 +553,7 @@ async function main() {
             'fi;',
         ].join('\n'));
         fs.writeFileSync(path.join(tmp, 'dynamic-def.g'), 'CrossFileValue := rec();\n');
+        provider.onWorkspaceFilesChanged();
         const dynamicDoc = makeDocument(
             'dynamic-loader.g',
             fs.readFileSync(path.join(tmp, 'dynamic-loader.g'), 'utf8'),
@@ -568,6 +569,7 @@ async function main() {
             '  return true;',
             'end;',
         ].join('\n'));
+        provider.onWorkspaceFilesChanged();
         const qualifiedCode = [
             'if not MAGNETIC_INTERNAL.IsIntegralSquareMatrix(value) then',
             'fi;',

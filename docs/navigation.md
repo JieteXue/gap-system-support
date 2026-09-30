@@ -55,10 +55,31 @@ Reference collection uses the same symbol classifier as definition navigation:
 
 ## Performance
 
-Workspace file discovery and parsed symbol indexes are cached and invalidated
-when relevant workspace files change. Repeated definition, reference, and Hover
-requests reuse document trees, file events, and short-lived workspace lookup
-caches instead of rescanning the workspace on every request.
+Hover, definition, and reference providers share one definition resolver.
+Each document model contains source lines, line offsets, scalar definition
+events, and lexical scope offsets. Unchanged models remain reusable even when
+the parser evicts and recreates their native syntax trees.
+
+Workspace fallback builds one symbol index per workspace, not one scan per
+symbol name. Indexes expire after five seconds and are invalidated on text
+edits, saves, file creation/deletion/renaming, and document closure. Current-file
+exclusion happens at lookup time so the same index serves different documents.
+Global alias bindings are indexed as cursor-sensitive histories, including
+bindings imported by literal `Read` calls.
+
+Reference indexes retain immutable names and positions instead of native
+syntax nodes, and qualified references are indexed by their leaf name before
+checking definition identity. Document and workspace indexes use bounded LRU
+caches. Disk files are checked by modification time and size; unchanged cache
+entries need neither another content read nor another parse. Open document
+versions take priority over disk signatures.
+
+Return-value tracing uses the shared source loader, request-local scope and
+record-field indexes, and memoized definition lookups. It temporarily copies
+syntax trees to keep recursive cross-file nodes valid during parser eviction
+and releases those copies when the request ends. Providers retain scalar
+cursor context before resolution so their ranges do not depend on an evicted
+tree.
 
 Limits in `src/limits.ts` bound document size, cache sizes, and scanned content.
 When a limit is reached, the provider returns no static result rather than
@@ -76,6 +97,8 @@ The automated suite covers:
 - Peek behavior with and without references;
 - reference exclusion rules and workspace cache reuse;
 - Hover resolution that shares the definition model.
+- cache invalidation for unsaved edits, new/deleted files, closure, and expiry;
+- shared parsing and workspace scans, and tracing beyond the parser cache size.
 
 Run the complete suite with:
 

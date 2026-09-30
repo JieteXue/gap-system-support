@@ -8,14 +8,11 @@ import type { GAPReferenceProvider } from '../references/referenceProvider';
 
 export class GAPDefinitionProvider implements vscode.DefinitionProvider {
 
-    private resolver: GAPDefinitionResolver;
-
     constructor(
         completionPath: string,
         private readonly referenceProvider?: GAPReferenceProvider,
-    ) {
-        this.resolver = new GAPDefinitionResolver(completionPath);
-    }
+        private readonly resolver = new GAPDefinitionResolver(completionPath),
+    ) {}
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.resolver.onDocumentClosed(uri);
@@ -38,11 +35,13 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
         const tree = getDocumentTree(document);
         const node = symbolNameNodeAt(tree.rootNode, offset);
         if (!node) return undefined;
+        const lookupName = symbolLookupName(node);
+        const nameLength = node.text.length;
 
         const resolved = this.resolver.resolveDefinitions(
             document,
             position,
-            symbolLookupName(node),
+            lookupName,
         );
         if (resolved.length === 0) return undefined;
 
@@ -55,13 +54,13 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
             return sameDocument &&
                 position.line === item.row &&
                 position.character >= item.column &&
-                position.character <= item.column + node.text.length;
+                position.character <= item.column + nameLength;
         });
         if (selfDefinition) {
             const selfLink = this.selfDefinitionLink(
                 document,
                 position,
-                node.text.length,
+                nameLength,
                 selfDefinition,
             );
             if (this.referenceProvider) {
@@ -86,7 +85,7 @@ export class GAPDefinitionProvider implements vscode.DefinitionProvider {
                 uri,
                 new vscode.Range(
                     new vscode.Position(item.row, item.column),
-                    new vscode.Position(item.row, item.column + node.text.length),
+                    new vscode.Position(item.row, item.column + nameLength),
                 ),
             );
         });

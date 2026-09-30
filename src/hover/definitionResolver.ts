@@ -3,16 +3,17 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseGapCode, getDocumentTree, isParserReady } from '../parser/gapParser';
-import { hasErrorAncestor, isTopLevel } from '../shared/treeUtils';
+import { getDocumentTree, isParserReady } from '../parser/gapParser';
+import { hasErrorAncestor } from '../shared/treeUtils';
 import { ReadChainFileCache, resolveReadBaseDir, resolveReadTarget } from '../shared/readFileCache';
 import { LruCache } from '../shared/lruCache';
 import { LazyQuery } from '../shared/lazyQuery';
 import { recordEntryLookupName } from '../shared/functionName';
 import { definitionText } from '../shared/definitionText';
 import { resolveValueFieldDefinitions } from './valueOriginResolver';
+import type { ValueSource } from './valueOriginResolver';
 import type { QueryMatch, SyntaxNode, Tree } from 'web-tree-sitter';
-import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT } from '../limits';
+import { HOVER_DOCUMENT_CACHE_MAX_ENTRIES, READ_CONTENT_LIMIT, WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES } from '../limits';
 
 const WORKSPACE_SYMBOL_CACHE_MS = 5000;
 
@@ -55,6 +56,27 @@ interface EventFile {
     events: FileEvent[];
     /** Source lines without trailing line breaks. */
     lines: string[];
+    document: vscode.TextDocument;
+}
+
+interface DocumentModel extends EventFile {
+    version: number;
+    tree: Tree;
+    text: string;
+    scopeByStart: Set<number>;
+    lineOffsets: number[];
+    aliases?: {
+        baseDir: string | null;
+        expiresAt: number;
+        revision: number;
+        changes: Map<string, { offset: number; target: string }[]>;
+    };
+}
+
+interface DefinitionCandidate {
+    event: Extract<FileEvent, { kind: 'def' }>;
+    lines: string[];
+    filePath: string;
 }
 
 export type DefinitionSymbolKind =
@@ -87,37 +109,79 @@ export interface ResolvedDefinition {
 
 interface WorkspaceSymbolCacheEntry {
     expiresAt: number;
-    results: {
-        event: Extract<FileEvent, { kind: 'def' }>;
-        lines: string[];
-        filePath: string;
-    }[];
+    symbols: Map<string, DefinitionCandidate[]>;
 }
 
 export class GAPDefinitionResolver {
 
     private readonly query: LazyQuery;
-    private readonly fileCache = new ReadChainFileCache<EventFile>(content => this.parseFile(content));
+    private readonly fileCache = new ReadChainFileCache<EventFile>(
+        (content, filePath) => this.parseFile(content, filePath),
+    );
 
     constructor(completionPath: string) {
         this.query = new LazyQuery(fs.readFileSync(completionPath, 'utf-8'));
     }
 
     // Cache the parsed event list and source lines for each document version.
-    private documentCache = new LruCache<
-        string,
-        { version: number; tree: Tree; events: FileEvent[]; scopeByStart: Set<number>; lines: string[] }
-    >({ maxEntries: HOVER_DOCUMENT_CACHE_MAX_ENTRIES });
-    private readonly workspaceSymbolCache = new Map<string, WorkspaceSymbolCacheEntry>();
+    private readonly documentCache = new LruCache<string, DocumentModel>({
+        maxEntries: HOVER_DOCUMENT_CACHE_MAX_ENTRIES,
+    });
+    private readonly workspaceSymbolCache = new LruCache<string, WorkspaceSymbolCacheEntry>({
+        maxEntries: WORKSPACE_SYMBOL_CACHE_MAX_ENTRIES,
+    });
     private resolvingValueFields = false;
+    private workspaceRevision = 0;
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.fileCache.onDocumentClosed(uri);
         this.documentCache.delete(uri.toString());
+        this.onWorkspaceFilesChanged();
     }
 
     onWorkspaceFilesChanged(): void {
         this.workspaceSymbolCache.clear();
+        this.workspaceRevision++;
+    }
+
+    private documentModel(document: vscode.TextDocument, text = document.getText()): DocumentModel | null {
+        if (!isParserReady() || text.length > READ_CONTENT_LIMIT) return null;
+        const tree = getDocumentTree(document, text);
+        const key = document.uri.toString();
+        const cached = this.documentCache.peek(key);
+        if (cached?.version === document.version && cached.text === text) {
+            cached.tree = tree;
+            cached.document = document;
+            this.documentCache.touch(key, cached);
+            return cached;
+        }
+        const collected = this.collectEvents(tree.rootNode);
+        const lines = text.split(/\r?\n/);
+        const lineOffsets = [0];
+        for (let index = 0; index < text.length; index++) {
+            if (text[index] === '\n') lineOffsets.push(index + 1);
+        }
+        const model: DocumentModel = {
+            document, text, lines, lineOffsets, tree, version: document.version,
+            events: collected.events.sort((a, b) => a.offset - b.offset),
+            scopeByStart: collected.scopeByStart,
+        };
+        this.documentCache.set(key, model);
+        return model;
+    }
+
+    private valueSource(filePath: string, current: vscode.TextDocument): ValueSource | null {
+        const document = !filePath || filePath === current.uri.fsPath ? current :
+            vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath) ??
+            this.fileCache.loadFile(filePath)?.document;
+        if (!document) return null;
+        const model = this.documentModel(document);
+        return model ? {
+            document,
+            tree: model.tree,
+            lines: model.lines,
+            offsetAt: position => (model.lineOffsets[position.line] ?? model.text.length) + position.character,
+        } : null;
     }
 
     /** Resolve the active definition for the given function name. */
@@ -126,39 +190,16 @@ export class GAPDefinitionResolver {
         position: vscode.Position,
         name: string,
     ): ResolvedDefinition | null {
-        if (!isParserReady()) return null;
-
-        const text = document.getText();
-        if (text.length > READ_CONTENT_LIMIT) return null;
-
-        const tree = getDocumentTree(document, text);
-        if (!tree) return null;
-
+        const model = this.documentModel(document);
+        if (!model) return null;
+        const { tree, events, scopeByStart, lines } = model;
         const offset = document.offsetAt(position);
-
-        // Document events and lines: reuse while the document version is unchanged.
-        const cacheKey = document.uri.toString();
-        let events: FileEvent[];
-        let scopeByStart: Set<number>;
-        let lines: string[];
-        const cached = this.documentCache.peek(cacheKey);
-        if (cached && cached.version === document.version && cached.tree === tree) {
-            this.documentCache.touch(cacheKey, cached);
-            events = cached.events;
-            scopeByStart = cached.scopeByStart;
-            lines = cached.lines;
-        } else {
-            const collected = this.collectEvents(tree.rootNode, false);
-            events = collected.events.sort((a, b) => a.offset - b.offset);
-            scopeByStart = collected.scopeByStart;
-            lines = text.split(/\r?\n/);
-            this.documentCache.set(cacheKey, { version: document.version, tree, events, scopeByStart, lines });
-        }
 
         const baseDir = resolveReadBaseDir(document);
         // Untitled documents have no real file: no Go to Definition link.
         const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
-        const lookupNames = this.resolveAliasNames(events, name, offset, baseDir);
+        const visible = this.visibleScopes(tree, offset, scopeByStart);
+        const lookupNames = this.resolveAliasNames(model, name, offset, baseDir);
         const resolutionNames = lookupNames.size > 1
             ? new Set([...lookupNames].filter(candidate => candidate !== name))
             : lookupNames;
@@ -171,7 +212,6 @@ export class GAPDefinitionResolver {
         }
 
         // Phase 1: scoped lookup, the same visibility rules as scoped completion.
-        const visible = this.visibleScopes(tree, offset, scopeByStart);
         const scoped = events.filter(
             (e): e is Extract<FileEvent, { kind: 'def' }> =>
                 e.kind === 'def' && visible.has(e.scope) && e.end < offset &&
@@ -207,29 +247,9 @@ export class GAPDefinitionResolver {
         position: vscode.Position,
         name: string,
     ): ResolvedDefinition | null {
-        if (!isParserReady()) return null;
-        const text = document.getText();
-        if (text.length > READ_CONTENT_LIMIT) return null;
-        const tree = getDocumentTree(document, text);
-        if (!tree) return null;
-
-        const cacheKey = document.uri.toString();
-        let events: FileEvent[];
-        const cached = this.documentCache.peek(cacheKey);
-        if (cached && cached.version === document.version && cached.tree === tree) {
-            this.documentCache.touch(cacheKey, cached);
-            events = cached.events;
-        } else {
-            const collected = this.collectEvents(tree.rootNode, false);
-            events = collected.events.sort((left, right) => left.offset - right.offset);
-            this.documentCache.set(cacheKey, {
-                version: document.version,
-                tree,
-                events,
-                scopeByStart: collected.scopeByStart,
-                lines: text.split(/\r?\n/),
-            });
-        }
+        const model = this.documentModel(document);
+        if (!model) return null;
+        const { events } = model;
         const offset = document.offsetAt(position);
         const baseDir = resolveReadBaseDir(document);
         if (!baseDir) return null;
@@ -298,28 +318,10 @@ export class GAPDefinitionResolver {
         position: vscode.Position,
         name: string,
     ): string[] {
-        if (!isParserReady()) return [name];
-        const text = document.getText();
-        if (text.length > READ_CONTENT_LIMIT) return [name];
-        const tree = getDocumentTree(document, text);
-        const cached = this.documentCache.peek(document.uri.toString());
-        let events: FileEvent[];
-        if (cached?.version === document.version && cached.tree === tree) {
-            events = cached.events;
-            this.documentCache.touch(document.uri.toString(), cached);
-        } else {
-            const collected = this.collectEvents(tree.rootNode, false);
-            events = collected.events.sort((a, b) => a.offset - b.offset);
-            this.documentCache.set(document.uri.toString(), {
-                version: document.version,
-                tree,
-                events,
-                scopeByStart: collected.scopeByStart,
-                lines: text.split(/\r?\n/),
-            });
-        }
+        const model = this.documentModel(document);
+        if (!model) return [name];
         return [...this.resolveAliasNames(
-            events, name, document.offsetAt(position), resolveReadBaseDir(document),
+            model, name, document.offsetAt(position), resolveReadBaseDir(document),
         )];
     }
 
@@ -337,7 +339,8 @@ export class GAPDefinitionResolver {
         this.resolvingValueFields = true;
         try {
             return resolveValueFieldDefinitions(document, position, name,
-                (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName));
+                (source, at, lookupName) => this.resolveDefinitions(source, at, lookupName),
+                filePath => this.valueSource(filePath, document));
         } finally {
             this.resolvingValueFields = false;
         }
@@ -348,36 +351,13 @@ export class GAPDefinitionResolver {
         position: vscode.Position,
         name: string,
     ): ResolvedDefinition[] {
-        const text = document.getText();
-        if (!isParserReady() || text.length > READ_CONTENT_LIMIT) return [];
-
-        const tree = getDocumentTree(document, text);
-        if (!tree) return [];
-
-        const cacheKey = document.uri.toString();
-        let events: FileEvent[];
-        let lines: string[];
-        const cached = this.documentCache.peek(cacheKey);
-        if (cached && cached.version === document.version && cached.tree === tree) {
-            this.documentCache.touch(cacheKey, cached);
-            events = cached.events;
-            lines = cached.lines;
-        } else {
-            const collected = this.collectEvents(tree.rootNode, false);
-            events = collected.events.sort((left, right) => left.offset - right.offset);
-            lines = text.split(/\r?\n/);
-            this.documentCache.set(cacheKey, {
-                version: document.version,
-                tree,
-                events,
-                scopeByStart: collected.scopeByStart,
-                lines,
-            });
-        }
+        const model = this.documentModel(document);
+        if (!model) return [];
+        const { events, lines } = model;
         const baseDir = resolveReadBaseDir(document);
         const currentFilePath = document.isUntitled ? '' : document.uri.fsPath;
         const offset = document.offsetAt(position);
-        const lookupNames = this.resolveAliasNames(events, name, offset, baseDir);
+        const lookupNames = this.resolveAliasNames(model, name, offset, baseDir);
         const resolutionNames = lookupNames.size > 1
             ? [...lookupNames].filter(candidate => candidate !== name)
             : [...lookupNames];
@@ -428,30 +408,26 @@ export class GAPDefinitionResolver {
         baseDir: string,
         name: string,
         currentFilePath: string,
-    ): {
-        event: Extract<FileEvent, { kind: 'def' }>;
-        lines: string[];
-        filePath: string;
-    }[] {
-        const key = `${baseDir}\0${name}`;
+    ): DefinitionCandidate[] {
         const now = Date.now();
-        const cached = this.workspaceSymbolCache.get(key);
-        if (cached && cached.expiresAt > now) return cached.results;
-        const results = this.scanWorkspaceSymbolDefinitions(baseDir, name, currentFilePath);
-        this.workspaceSymbolCache.set(key, {
-            expiresAt: now + WORKSPACE_SYMBOL_CACHE_MS,
-            results,
-        });
-        return results;
+        let cached = this.workspaceSymbolCache.peek(baseDir);
+        if (!cached || cached.expiresAt <= now) {
+            cached = {
+                expiresAt: now + WORKSPACE_SYMBOL_CACHE_MS,
+                symbols: this.scanWorkspaceSymbolDefinitions(baseDir),
+            };
+            this.workspaceSymbolCache.set(baseDir, cached);
+        } else {
+            this.workspaceSymbolCache.touch(baseDir, cached);
+        }
+        return (cached.symbols.get(name) ?? []).filter(candidate => candidate.filePath !== currentFilePath);
     }
 
     /** Find top-level user definitions in sibling GAP source files. */
     private scanWorkspaceSymbolDefinitions(
         baseDir: string,
-        name: string,
-        currentFilePath: string,
-    ): { event: Extract<FileEvent, { kind: 'def' }>; lines: string[]; filePath: string }[] {
-        const results: { event: Extract<FileEvent, { kind: 'def' }>; lines: string[]; filePath: string }[] = [];
+    ): Map<string, DefinitionCandidate[]> {
+        const symbols = new Map<string, DefinitionCandidate[]>();
         const visited = new Set<string>();
         const sourceExtensions = new Set(['.g', '.gd', '.gi', '.gap']);
 
@@ -470,20 +446,23 @@ export class GAPDefinitionResolver {
                     continue;
                 }
                 if (!entry.isFile() || !sourceExtensions.has(path.extname(entry.name).toLowerCase())) continue;
-                if (filePath === currentFilePath || visited.has(filePath)) continue;
+                if (visited.has(filePath)) continue;
                 visited.add(filePath);
                 const read = this.fileCache.loadFile(filePath);
                 if (!read) continue;
                 for (const event of read.events) {
-                    if (event.kind === 'def' && event.name === name && event.scope === GLOBAL_SCOPE) {
-                        results.push({ event, lines: read.lines, filePath });
+                    if (event.kind === 'def' && event.scope === GLOBAL_SCOPE) {
+                        const candidate = { event, lines: read.lines, filePath };
+                        const bucket = symbols.get(event.name);
+                        if (bucket) bucket.push(candidate);
+                        else symbols.set(event.name, [candidate]);
                     }
                 }
             }
         };
 
         visit(baseDir);
-        return results;
+        return symbols;
     }
 
     private scanAllSymbolDefinitions(
@@ -548,16 +527,6 @@ export class GAPDefinitionResolver {
         return visible;
     }
 
-    /** The latest (max end) scoped def carrying the searched name. */
-    private pickLatestByName(defs: Extract<FileEvent, { kind: 'def' }>[], name: string) {
-        let best: Extract<FileEvent, { kind: 'def' }> | null = null;
-        for (const d of defs) {
-            if (d.name !== name) continue;
-            if (!best || d.end > best.end) best = d;
-        }
-        return best;
-    }
-
     /** Pick the latest definition when the lookup has already been normalized. */
     private pickLatest(defs: Extract<FileEvent, { kind: 'def' }>[]) {
         let best: Extract<FileEvent, { kind: 'def' }> | null = null;
@@ -573,30 +542,39 @@ export class GAPDefinitionResolver {
      * cursor and reachable through literal Read() calls are considered.
      */
     private resolveAliasNames(
-        events: FileEvent[],
+        model: DocumentModel,
         name: string,
         maxOffset: number,
         baseDir: string | null,
     ): Set<string> {
-        const aliases = new Map<string, string>();
-        const visited = new Set<string>();
-
-        const collect = (fileEvents: FileEvent[], limit: number, filePath: string): void => {
-            for (const event of fileEvents) {
-                if (event.offset > limit) break;
-                if (event.kind === 'alias' && event.scope === GLOBAL_SCOPE) {
-                    aliases.set(event.name, event.target);
-                } else if (event.kind === 'read' && baseDir) {
-                    const target = resolveReadTarget(event.pathText, baseDir);
-                    if (!target || visited.has(target)) continue;
-                    visited.add(target);
-                    const read = this.fileCache.loadFile(target);
-                    if (read) collect(read.events, Number.POSITIVE_INFINITY, target);
+        let aliases = model.aliases;
+        const now = Date.now();
+        if (!aliases || aliases.baseDir !== baseDir || aliases.expiresAt <= now ||
+            aliases.revision !== this.workspaceRevision) {
+            const changes = new Map<string, { offset: number; target: string }[]>();
+            const visited = new Set<string>();
+            const collect = (events: FileEvent[], readOffset?: number): void => {
+                for (const event of events) {
+                    const offset = readOffset ?? event.offset;
+                    if (event.kind === 'alias' && event.scope === GLOBAL_SCOPE) {
+                        const bucket = changes.get(event.name);
+                        const binding = { offset, target: event.target };
+                        if (bucket) bucket.push(binding);
+                        else changes.set(event.name, [binding]);
+                    } else if (event.kind === 'read' && baseDir) {
+                        const target = resolveReadTarget(event.pathText, baseDir);
+                        if (!target || visited.has(target)) continue;
+                        visited.add(target);
+                        const read = this.fileCache.loadFile(target);
+                        if (read) collect(read.events, offset);
+                    }
                 }
-            }
-        };
-
-        collect(events, maxOffset, '');
+            };
+            collect(model.events);
+            aliases = { baseDir, changes, revision: this.workspaceRevision,
+                expiresAt: now + WORKSPACE_SYMBOL_CACHE_MS };
+            model.aliases = aliases;
+        }
         const names = new Set<string>([name]);
         const suffixIndex = name.indexOf('.');
         const root = suffixIndex < 0 ? name : name.slice(0, suffixIndex);
@@ -605,7 +583,15 @@ export class GAPDefinitionResolver {
         let currentRoot = root;
         while (!seenRoots.has(currentRoot)) {
             seenRoots.add(currentRoot);
-            const target = aliases.get(currentRoot);
+            const bindings = aliases.changes.get(currentRoot) ?? [];
+            let low = 0;
+            let high = bindings.length;
+            while (low < high) {
+                const middle = (low + high) >>> 1;
+                if (bindings[middle].offset <= maxOffset) low = middle + 1;
+                else high = middle;
+            }
+            const target = bindings[low - 1]?.target;
             if (!target) break;
             names.add(target + suffix);
             currentRoot = target;
@@ -687,7 +673,7 @@ export class GAPDefinitionResolver {
     }
 
     /** Collect definition and Read events plus the scope index for one parsed file. */
-    private collectEvents(rootNode: SyntaxNode, topLevelOnly: boolean): { events: FileEvent[]; scopeByStart: Set<number> } {
+    private collectEvents(rootNode: SyntaxNode): { events: FileEvent[]; scopeByStart: Set<number> } {
         const events: FileEvent[] = [];
         // Scope nodes of this file, from the shared completion.scm capture.
         const scopeByStart = new Set<number>();
@@ -695,7 +681,6 @@ export class GAPDefinitionResolver {
             string,
             {
                 node: SyntaxNode;
-                keep: boolean;
                 symbolKind: 'parameter' | 'variable' | 'function';
                 lookupName?: string;
                 matchStart?: number;
@@ -720,7 +705,6 @@ export class GAPDefinitionResolver {
                     if (!existing || kindPriority[symbolKind] > kindPriority[existing.symbolKind]) {
                         defNodes.set(key, {
                             node,
-                            keep: !topLevelOnly || isTopLevel(node),
                             symbolKind,
                         });
                     }
@@ -750,7 +734,6 @@ export class GAPDefinitionResolver {
                     if (!existing || kindPriority.variable > kindPriority[existing.symbolKind]) {
                         defNodes.set(key, {
                             node: left,
-                            keep: !topLevelOnly || isTopLevel(left),
                             symbolKind: 'variable',
                             lookupName: recordEntryLookupName(node) ?? left.text,
                         });
@@ -768,7 +751,6 @@ export class GAPDefinitionResolver {
                     if (!existing || kindPriority.variable > kindPriority[existing.symbolKind]) {
                         defNodes.set(key, {
                             node: selector,
-                            keep: !topLevelOnly || isTopLevel(selector),
                             symbolKind: 'variable',
                             lookupName: left!.text,
                             matchStart: left!.startIndex,
@@ -818,13 +800,11 @@ export class GAPDefinitionResolver {
         // Attach every definition to its innermost enclosing scope, as scoped.ts does.
         for (const {
             node,
-            keep,
             symbolKind,
             lookupName,
             matchStart,
             matchEnd,
         } of defNodes.values()) {
-            if (!keep) continue;
             let scope = GLOBAL_SCOPE;
             let current: SyntaxNode | null = node.parent;
             while (current && current.type !== 'source_file') {
@@ -982,14 +962,25 @@ export class GAPDefinitionResolver {
         return right.text.slice(0, params.endIndex - right.startIndex).replace(/\s+/g, ' ').trimEnd();
     }
 
-    private parseFile(content: string): EventFile | null {
-        const tree = parseGapCode(content);
-        try {
-            const { events } = this.collectEvents(tree.rootNode, true);
-            events.sort((a, b) => a.offset - b.offset);
-            return { events, lines: content.split(/\r?\n/) };
-        } finally {
-            tree.delete();
+    private parseFile(content: string, filePath: string): EventFile | null {
+        const open = vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath);
+        const offsets = [0];
+        for (let index = 0; index < content.length; index++) {
+            if (content[index] === '\n') offsets.push(index + 1);
         }
+        const document = open ?? {
+            uri: vscode.Uri.file(filePath),
+            version: 1,
+            isUntitled: false,
+            getText: () => content,
+            offsetAt: (position: vscode.Position) =>
+                (offsets[position.line] ?? content.length) + position.character,
+        } as vscode.TextDocument;
+        const model = this.documentModel(document, content);
+        return model ? {
+            document,
+            events: model.events.filter(event => event.kind === 'read' || event.scope === GLOBAL_SCOPE),
+            lines: model.lines,
+        } : null;
     }
 }

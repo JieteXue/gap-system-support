@@ -6,7 +6,8 @@ import { getDocumentTree, isParserReady } from '../parser/gapParser';
 import { GAPDefinitionResolver } from '../hover/definitionResolver';
 import type { ResolvedDefinition } from '../hover/definitionResolver';
 import { symbolLookupName, symbolNameNodeAt } from '../shared/functionName';
-import { READ_CONTENT_LIMIT } from '../limits';
+import { READ_CONTENT_LIMIT, REFERENCE_DOCUMENT_CACHE_MAX_ENTRIES } from '../limits';
+import { LruCache } from '../shared/lruCache';
 
 const SOURCE_GLOB = '**/*.{g,gd,gi,gap}';
 const EXCLUDE_GLOB = '**/{.git,node_modules,out}/**';
@@ -14,7 +15,16 @@ const WORKSPACE_URI_CACHE_MS = 5000;
 
 interface SymbolIndex {
     version: number;
-    symbols: Map<string, SyntaxNode[]>;
+    text: string;
+    byLeaf: Map<string, SymbolOccurrence[]>;
+    unqualified: SymbolOccurrence[];
+}
+
+interface SymbolOccurrence {
+    name: string;
+    isBinding: boolean;
+    startPosition: { row: number; column: number };
+    endPosition: { row: number; column: number };
 }
 
 function definitionKey(definition: ResolvedDefinition): string {
@@ -48,14 +58,18 @@ function isOriginLocation(
 
 export class GAPReferenceProvider implements vscode.ReferenceProvider {
 
-    private readonly resolver: GAPDefinitionResolver;
-    private readonly symbolIndexCache = new Map<string, SymbolIndex>();
-    private readonly documentCache = new Map<string, vscode.TextDocument>();
+    private readonly symbolIndexCache = new LruCache<string, SymbolIndex>({
+        maxEntries: REFERENCE_DOCUMENT_CACHE_MAX_ENTRIES,
+    });
+    private readonly documentCache = new LruCache<string, vscode.TextDocument>({
+        maxEntries: REFERENCE_DOCUMENT_CACHE_MAX_ENTRIES,
+    });
     private readonly workspaceUriCache = new Map<string, { expiresAt: number; uris: vscode.Uri[] }>();
 
-    constructor(completionPath: string) {
-        this.resolver = new GAPDefinitionResolver(completionPath);
-    }
+    constructor(
+        completionPath: string,
+        private readonly resolver = new GAPDefinitionResolver(completionPath),
+    ) {}
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.resolver.onDocumentClosed(uri);
@@ -81,15 +95,14 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         const node = symbolNameNodeAt(tree.rootNode, document.offsetAt(position));
         if (!node) return [];
         const lookupName = symbolLookupName(node);
-        const definitions = this.resolver.resolveDefinitions(document, position, lookupName);
-        if (definitions.length === 0) return [];
-
         const originFilePath = document.isUntitled ? '' : document.uri.fsPath;
         const originKey = locationKey(
             originFilePath,
             node.startPosition.row,
             node.startPosition.column,
         );
+        const definitions = this.resolver.resolveDefinitions(document, position, lookupName);
+        if (definitions.length === 0) return [];
         const targetDefinitions = new Set(definitions.map(definitionKey));
         const targetNames = new Set(this.resolver.resolveLookupNames(document, position, lookupName));
         const definitionLocations = new Set(definitions.map(definitionKey));
@@ -159,7 +172,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                 // If static lexical resolution finds a different definition,
                 // this occurrence belongs to that local symbol instead.
                 if (!isDefinition) {
-                    const candidateName = symbolLookupName(candidate);
+                    const candidateName = candidate.name;
                     const candidatePosition = new vscode.Position(
                         candidate.startPosition.row,
                         candidate.startPosition.column,
@@ -170,7 +183,7 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
                     if (!/[.!]/.test(lookupName) && candidateName !== lookupName &&
                         !candidateNames.some(name => targetNames.has(name))) continue;
                     const isAlias = candidateNames.some(name => name !== candidateName);
-                    const localDefinition = isAlias ? null : this.resolver.resolveDefinition(
+                    const localDefinition = isAlias && !candidate.isBinding ? null : this.resolver.resolveDefinition(
                         candidateDocument, candidatePosition, candidateName,
                     );
                     const candidateDefinitions = localDefinition ? [localDefinition] :
@@ -200,45 +213,48 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
         document: vscode.TextDocument,
         text: string,
         lookupName: string,
-    ): SyntaxNode[] {
+    ): SymbolOccurrence[] {
         const key = document.uri.toString();
-        const cached = this.symbolIndexCache.get(key);
-        if (cached?.version === document.version) {
-            return this.referenceCandidates(cached.symbols, lookupName);
+        const cached = this.symbolIndexCache.peek(key);
+        if (cached?.version === document.version && cached.text === text) {
+            this.symbolIndexCache.touch(key, cached);
+            return this.referenceCandidates(cached, lookupName);
         }
 
         const tree = getDocumentTree(document, text);
-        const symbols = new Map<string, SyntaxNode[]>();
+        const index: SymbolIndex = {
+            version: document.version, text, byLeaf: new Map(), unqualified: [],
+        };
         const visit = (node: SyntaxNode): void => {
             if (node.type === 'identifier' || node.type === 'string_content') {
                 const classified = symbolNameNodeAt(tree.rootNode, node.startIndex);
                 if (classified?.id === node.id) {
                     const name = symbolLookupName(node);
-                    const entries = symbols.get(name);
-                    if (entries) entries.push(node);
-                    else symbols.set(name, [node]);
+                    const occurrence: SymbolOccurrence = {
+                        name,
+                        isBinding: node.parent?.type === 'assignment_statement' &&
+                            node.parent.childForFieldName('left')?.id === node.id,
+                        startPosition: { ...node.startPosition },
+                        endPosition: { ...node.endPosition },
+                    };
+                    const leaf = name.split(/[.!]/).filter(Boolean).pop() ?? name;
+                    const entries = index.byLeaf.get(leaf);
+                    if (entries) entries.push(occurrence);
+                    else index.byLeaf.set(leaf, [occurrence]);
+                    if (!/[.!]/.test(name)) index.unqualified.push(occurrence);
                 }
             }
             for (const child of node.namedChildren) visit(child);
         };
         visit(tree.rootNode);
-        this.symbolIndexCache.set(key, { version: document.version, symbols });
-        return this.referenceCandidates(symbols, lookupName);
+        this.symbolIndexCache.set(key, index);
+        return this.referenceCandidates(index, lookupName);
     }
 
-    private referenceCandidates(symbols: Map<string, SyntaxNode[]>, lookupName: string): SyntaxNode[] {
-        const qualified = /[.!]/.test(lookupName);
-        const leaf = lookupName.split(/[.!]/).filter(Boolean).pop();
-        const candidates: SyntaxNode[] = [];
-        for (const [name, nodes] of symbols) {
-            // Aliases change the root, but preserve the selected field name.
-            if (qualified
-                ? name.split(/[.!]/).filter(Boolean).pop() === leaf
-                : !/[.!]/.test(name)) {
-                candidates.push(...nodes);
-            }
-        }
-        return candidates;
+    private referenceCandidates(index: SymbolIndex, lookupName: string): SymbolOccurrence[] {
+        if (!/[.!]/.test(lookupName)) return index.unqualified;
+        const leaf = lookupName.split(/[.!]/).filter(Boolean).pop() ?? lookupName;
+        return index.byLeaf.get(leaf) ?? [];
     }
 
     private async workspaceDocuments(
@@ -276,8 +292,11 @@ export class GAPReferenceProvider implements vscode.ReferenceProvider {
             if (seen.has(uri.toString())) continue;
             try {
                 const key = uri.toString();
-                const cachedDocument = this.documentCache.get(key);
-                if (cachedDocument) add(cachedDocument);
+                const cachedDocument = this.documentCache.peek(key);
+                if (cachedDocument) {
+                    this.documentCache.touch(key, cachedDocument);
+                    add(cachedDocument);
+                }
                 else {
                     const opened = await vscode.workspace.openTextDocument(uri);
                     this.documentCache.set(key, opened);

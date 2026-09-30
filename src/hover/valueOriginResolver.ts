@@ -1,19 +1,30 @@
 /** Trace record fields through assignments and function return values without executing GAP. */
 
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import type { SyntaxNode, Tree } from 'web-tree-sitter';
-import { getDocumentTree, parseGapCode } from '../parser/gapParser';
 import { hasErrorAncestor } from '../shared/treeUtils';
 import { symbolNameNodeAt } from '../shared/functionName';
 import { definitionText } from '../shared/definitionText';
-import { READ_CONTENT_LIMIT, VALUE_ORIGIN_MAX_DEPTH, VALUE_ORIGIN_MAX_STEPS } from '../limits';
+import { VALUE_ORIGIN_MAX_DEPTH, VALUE_ORIGIN_MAX_STEPS } from '../limits';
 import type { ResolvedDefinition } from './definitionResolver';
 
-interface Source {
+export interface ValueSource {
     document: vscode.TextDocument;
     tree: Tree;
-    text: string;
+    lines: string[];
+    offsetAt: (position: vscode.Position) => number;
+}
+
+interface ScopeIndex {
+    assignments: Map<string, SyntaxNode[]>;
+    additions: Map<string, SyntaxNode[]>;
+    returns: SyntaxNode[];
+    locals: Set<string>;
+}
+
+interface Source extends ValueSource {
+    scopes: Map<number, ScopeIndex>;
+    records: Map<number, Map<string, SyntaxNode[]>>;
 }
 
 interface Expression {
@@ -57,51 +68,90 @@ function visitScope(scope: SyntaxNode, visit: (node: SyntaxNode) => void): void 
     walk(scope);
 }
 
+function appendNode(index: Map<string, SyntaxNode[]>, name: string, node: SyntaxNode): void {
+    const bucket = index.get(name);
+    if (bucket) bucket.push(node);
+    else index.set(name, [node]);
+}
+
+/** Nodes are collected in source order; only completed statements are visible. */
+function precedingCount(nodes: SyntaxNode[], offset: number): number {
+    let low = 0;
+    let high = nodes.length;
+    while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (nodes[middle].endIndex < offset) low = middle + 1;
+        else high = middle;
+    }
+    return low;
+}
+
 export function resolveValueFieldDefinitions(
     document: vscode.TextDocument,
     position: vscode.Position,
     name: string,
     findDefinitions: FindDefinitions,
+    loadSource: (filePath: string) => ValueSource | null,
 ): ResolvedDefinition[] {
     const parts = name.split('.');
     if (parts.length < 2 || !parts.every(part => /^[A-Za-z_][A-Za-z_0-9]*$/.test(part))) return [];
     const sources = new Map<string, Source>();
     const ownedTrees: Tree[] = [];
     const active = new Set<string>();
+    const definitionCache = new Map<string, ResolvedDefinition[]>();
     let steps = 0;
 
     const sourceFor = (filePath: string): Source | null => {
         const key = filePath || document.uri.toString();
         const cached = sources.get(key);
         if (cached) return cached;
-        const open = filePath === document.uri.fsPath || !filePath ? document :
-            vscode.workspace.textDocuments.find(item => item.uri.fsPath === filePath);
-        let text: string;
-        try {
-            if (!open && fs.statSync(filePath).size > READ_CONTENT_LIMIT) return null;
-            text = open ? open.getText() : fs.readFileSync(filePath, 'utf8');
-        } catch {
-            return null;
-        }
-        if (text.length > READ_CONTENT_LIMIT) return null;
-        const tree = open ? getDocumentTree(open, text) : parseGapCode(text);
-        if (!open) ownedTrees.push(tree);
-        const lines = text.split(/\r?\n/);
-        const sourceDocument = open ?? {
-            uri: vscode.Uri.file(filePath),
-            version: 1,
-            isUntitled: false,
-            getText: () => text,
-            offsetAt: (p: vscode.Position) =>
-                lines.slice(0, p.line).reduce((sum, line) => sum + line.length + 1, 0) + p.character,
-        } as vscode.TextDocument;
-        const source = { document: sourceDocument, tree, text };
+        const loaded = loadSource(filePath);
+        if (!loaded) return null;
+        // A cheap tree copy pins native nodes while nested lookups evict parser entries.
+        const tree = loaded.tree.copy();
+        ownedTrees.push(tree);
+        const source: Source = { ...loaded, tree, scopes: new Map(), records: new Map() };
         sources.set(key, source);
         return source;
     };
 
+    const definitionsFor = (source: Source, node: SyntaxNode, lookupName: string): ResolvedDefinition[] => {
+        const key = `${source.document.uri.toString()}:${node.startIndex}:${lookupName}`;
+        const cached = definitionCache.get(key);
+        if (cached) return cached;
+        const definitions = findDefinitions(source.document,
+            new vscode.Position(node.startPosition.row, node.startPosition.column), lookupName);
+        definitionCache.set(key, definitions);
+        return definitions;
+    };
+
+    const scopeIndex = (source: Source, scope: SyntaxNode): ScopeIndex => {
+        const cached = source.scopes.get(scope.startIndex);
+        if (cached) return cached;
+        const index: ScopeIndex = {
+            assignments: new Map(), additions: new Map(), returns: [], locals: new Set(),
+        };
+        for (const declaration of [scope.childForFieldName('parameters'), scope.childForFieldName('locals')]) {
+            for (const child of declaration?.namedChildren ?? []) index.locals.add(child.text);
+        }
+        visitScope(scope, node => {
+            if (node.type === 'assignment_statement') {
+                const left = node.childForFieldName('left');
+                if (left) appendNode(index.assignments, left.text, node);
+            } else if (node.type === 'return_statement') {
+                const value = node.namedChildren[0];
+                if (value) index.returns.push(value);
+            } else if (node.type === 'call' && node.childForFieldName('function')?.text === 'Add') {
+                const list = node.childForFieldName('arguments')?.namedChildren[0];
+                if (list) appendNode(index.additions, list.text, node);
+            }
+        });
+        source.scopes.set(scope.startIndex, index);
+        return index;
+    };
+
     const fieldDefinition = (node: SyntaxNode, context: Context): ResolvedDefinition => {
-        const lines = context.source.text.split(/\r?\n/);
+        const lines = context.source.lines;
         const row = node.startPosition.row;
         const commentLines: string[] = [];
         for (let index = row - 1; index >= 0 && lines[index].trimStart().startsWith('##'); index--) {
@@ -132,8 +182,16 @@ export function resolveValueFieldDefinitions(
             value ? trace({ node: value, context: ctx }, rest, depth + 1) : [];
         try {
             if (node.type === 'record_expression') {
-                const entries = node.namedChildren.filter(entry =>
-                    entry.type === 'record_entry' && entry.childForFieldName('left')?.text === fields[0]);
+                let record = context.source.records.get(node.startIndex);
+                if (!record) {
+                    record = new Map();
+                    for (const entry of node.namedChildren) {
+                        const left = entry.type === 'record_entry' ? entry.childForFieldName('left') : null;
+                        if (left) appendNode(record, left.text, entry);
+                    }
+                    context.source.records.set(node.startIndex, record);
+                }
+                const entries = record.get(fields[0]) ?? [];
                 return entries.flatMap(entry => fields.length === 1
                     ? [fieldDefinition(entry.childForFieldName('left')!, context)]
                     : follow(entry.childForFieldName('right'), fields.slice(1)));
@@ -151,47 +209,32 @@ export function resolveValueFieldDefinitions(
             }
             if (node.type === 'identifier') {
                 const scope = scopeOf(node);
-                const assignments: SyntaxNode[] = [];
-                const updates: SyntaxNode[] = [];
-                const additions: SyntaxNode[] = [];
-                visitScope(scope, candidate => {
-                    if (candidate.endIndex >= node.startIndex) return;
-                    if (candidate.type === 'assignment_statement') {
-                        const left = candidate.childForFieldName('left');
-                        if (left?.text === node.text) assignments.push(candidate);
-                        if (left?.text === `${node.text}.${fields[0]}`) updates.push(candidate);
-                    }
-                    if (fields[0] === '[]' && candidate.type === 'call' &&
-                        candidate.childForFieldName('function')?.text === 'Add' &&
-                        candidate.childForFieldName('arguments')?.namedChildren[0]?.text === node.text) {
-                        additions.push(candidate);
-                    }
-                });
-                const update = updates.at(-1);
+                const index = scopeIndex(context.source, scope);
+                const assignments = index.assignments.get(node.text) ?? [];
+                const updates = index.assignments.get(`${node.text}.${fields[0]}`) ?? [];
+                const additions = fields[0] === '[]' ? index.additions.get(node.text) ?? [] : [];
+                const update = updates[precedingCount(updates, node.startIndex) - 1];
                 if (update) {
                     const left = update.childForFieldName('left')!;
                     return fields.length === 1
                         ? [fieldDefinition(left.childForFieldName('selector')!, context)]
                         : follow(update.childForFieldName('right'), fields.slice(1));
                 }
-                if (additions.length > 0) {
-                    return additions.flatMap(call =>
+                const additionCount = precedingCount(additions, node.startIndex);
+                if (additionCount > 0) {
+                    return additions.slice(0, additionCount).flatMap(call =>
                         follow(call.childForFieldName('arguments')?.namedChildren[1], fields.slice(1)));
                 }
-                const assignment = assignments.at(-1);
+                const assignment = assignments[precedingCount(assignments, node.startIndex) - 1];
                 if (assignment) return follow(assignment.childForFieldName('right'));
                 const binding = context.bindings.get(node.text);
                 if (binding) return trace(binding, fields, depth + 1);
-                const locallyDeclared = isFunction(scope) &&
-                    [scope.childForFieldName('parameters'), scope.childForFieldName('locals')]
-                        .some(declaration => declaration?.namedChildren.some(child => child.text === node.text));
-                if (locallyDeclared) return [];
-                return findDefinitions(context.source.document,
-                    new vscode.Position(node.startPosition.row, node.startPosition.column), node.text)
+                if (isFunction(scope) && index.locals.has(node.text)) return [];
+                return definitionsFor(context.source, node, node.text)
                     .flatMap(definition => {
                         const source = sourceFor(definition.filePath);
                         if (!source) return [];
-                        const target = source.tree.rootNode.descendantForIndex(source.document.offsetAt(
+                        const target = source.tree.rootNode.descendantForIndex(source.offsetAt(
                             new vscode.Position(definition.row, definition.column)));
                         return follow(definitionValue(target), fields,
                             { source, bindings: new Map() });
@@ -201,12 +244,11 @@ export function resolveValueFieldDefinitions(
                 const callee = node.childForFieldName('function');
                 if (!callee || !['identifier', 'record_selector'].includes(callee.type)) return [];
                 const args = node.childForFieldName('arguments')?.namedChildren ?? [];
-                return findDefinitions(context.source.document,
-                    new vscode.Position(callee.startPosition.row, callee.startPosition.column), callee.text)
+                return definitionsFor(context.source, callee, callee.text)
                     .flatMap(definition => {
                         const source = sourceFor(definition.filePath);
                         if (!source) return [];
-                        const target = source.tree.rootNode.descendantForIndex(source.document.offsetAt(
+                        const target = source.tree.rootNode.descendantForIndex(source.offsetAt(
                             new vscode.Position(definition.row, definition.column)));
                         const fn = definitionValue(target);
                         if (!fn || !isFunction(fn)) return [];
@@ -214,13 +256,8 @@ export function resolveValueFieldDefinitions(
                         fn.childForFieldName('parameters')?.namedChildren.forEach((parameter, index) => {
                             if (args[index]) bindings.set(parameter.text, { node: args[index], context });
                         });
-                        const result: ResolvedDefinition[] = [];
-                        visitScope(fn, candidate => {
-                            if (candidate.type === 'return_statement') {
-                                result.push(...follow(candidate.namedChildren[0], fields, { source, bindings }));
-                            }
-                        });
-                        return result;
+                        return scopeIndex(source, fn).returns.flatMap(value =>
+                            follow(value, fields, { source, bindings }));
                     });
             }
             return [];

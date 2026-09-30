@@ -17,7 +17,7 @@ interface ReadChainFileEntry<T> {
 }
 
 /** Parses file content into the caller specific model. */
-type ParseReadChainFile<T> = (content: string) => T | null;
+type ParseReadChainFile<T> = (content: string, filePath: string) => T | null;
 
 export class ReadChainFileCache<T> {
 
@@ -38,28 +38,21 @@ export class ReadChainFileCache<T> {
     /** Read and parse one file through the shared cache. */
     loadFile(filePath: string): T | null {
         const open = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
-        let content: string;
         let signature: string;
         if (open) {
-            content = open.getText();
             signature = `doc:${open.version}`;
         } else {
-            const loaded = tryValue((): { signature: string; content: string } | null => {
+            const loaded = tryValue((): string | null => {
                 const stat = fs.statSync(filePath);
                 if (stat.size > READ_CONTENT_LIMIT) return null;
-                return {
-                    signature: `file:${stat.mtimeMs}:${stat.size}`,
-                    content: fs.readFileSync(filePath, 'utf-8'),
-                };
+                return `file:${stat.mtimeMs}:${stat.size}`;
             }, null);
             if (loaded === null) {
                 // Missing file, silently skip.
                 return null;
             }
-            signature = loaded.signature;
-            content = loaded.content;
+            signature = loaded;
         }
-        if (content.length > READ_CONTENT_LIMIT) return null;
 
         const cached = this.cache.peek(filePath);
         if (cached && cached.signature === signature) {
@@ -67,7 +60,10 @@ export class ReadChainFileCache<T> {
             return cached.file;
         }
 
-        const file = this.parseFile(content);
+        const content = open ? open.getText() :
+            tryValue(() => fs.readFileSync(filePath, 'utf-8'), null);
+        if (content === null || content.length > READ_CONTENT_LIMIT) return null;
+        const file = this.parseFile(content, filePath);
         this.cache.set(filePath, { signature, file });
         return file;
     }

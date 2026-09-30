@@ -315,8 +315,7 @@ function systemMarkdown(name: string, help?: BuiltinHelp): vscode.MarkdownString
 }
 
 function userSymbolType(
-    root: SyntaxNode,
-    node: SyntaxNode,
+    isFunctionName: boolean,
     lookupName: string,
     resolved: ResolvedDefinition,
 ): string {
@@ -326,7 +325,7 @@ function userSymbolType(
         resolved.symbolKind === 'operation' ||
         resolved.symbolKind === 'method' ||
         resolved.symbolKind === 'attribute' ||
-        functionNameNodeAt(root, node.startIndex)?.id === node.id ||
+        isFunctionName ||
         /\b(?:atomic\s+)?function\b|->/.test(resolved.definitionLine)) {
         return 'function';
     }
@@ -375,11 +374,10 @@ function customMarkdown(
 
 export class GAPHoverProvider implements vscode.HoverProvider {
 
-    private resolver: GAPDefinitionResolver;
-
-    constructor(completionPath: string) {
-        this.resolver = new GAPDefinitionResolver(completionPath);
-    }
+    constructor(
+        completionPath: string,
+        private readonly resolver = new GAPDefinitionResolver(completionPath),
+    ) {}
 
     onDocumentClosed(uri: vscode.Uri): void {
         this.resolver.onDocumentClosed(uri);
@@ -425,12 +423,18 @@ export class GAPHoverProvider implements vscode.HoverProvider {
         }
 
         const name = hoverLookupName(node);
+        // Cross-file resolution can evict this tree; retain only scalar context.
+        const range = this.rangeOf(document, node);
+        const isFunctionName = functionNameNodeAt(tree.rootNode, node.startIndex)?.id === node.id;
+        const isBoundArgument = isIsBoundArgument(node);
+        const isSelector = selectorExpression(node).id !== node.id;
+        const isCall = isFunctionName || isCallCallee(node);
 
         // Gate 2: GAP functions win over user defined ones.
         const systemNames = getFunctionNames();
         const help = findBuiltinHelp(name);
         if (systemNames?.has(name) || BUILTIN_FUNCTION_NAMES.has(name) || help) {
-            return new vscode.Hover(systemMarkdown(name, help), this.rangeOf(document, node));
+            return new vscode.Hover(systemMarkdown(name, help), range);
         }
 
         // Gate 3: user-defined symbols resolved through the Read chain.
@@ -440,14 +444,14 @@ export class GAPHoverProvider implements vscode.HoverProvider {
             ? this.resolver.resolveDefinitions(document, position, name)[0] ?? null
             : this.resolver.resolveDefinition(document, position, name);
         // A loader may use a symbol in an IsBound guard before Read() loads its definition.
-        if (!resolved && isIsBoundArgument(node)) {
+        if (!resolved && isBoundArgument) {
             resolved = this.resolver.resolveDefinitionFromFutureReads(document, position, name);
             if (!resolved) {
                 resolved = this.resolver.resolveWorkspaceDefinition(document, name);
             }
         }
         if (!resolved && (name.includes('.') || name.includes('!') ||
-            selectorExpression(node).id !== node.id)) {
+            isSelector)) {
             resolved = this.resolver.resolveWorkspaceDefinition(document, name);
         }
         if (!resolved && name.includes('.')) {
@@ -456,22 +460,22 @@ export class GAPHoverProvider implements vscode.HoverProvider {
                 return new vscode.Hover(definitions.map(definition => customMarkdown({
                     ...definition,
                     symbolType: 'record field',
-                })), this.rangeOf(document, node));
+                })), range);
             }
         }
         if (resolved) {
             return new vscode.Hover(
                 customMarkdown({
                     ...resolved,
-                    symbolType: userSymbolType(tree.rootNode, node, name, resolved),
+                    symbolType: userSymbolType(isFunctionName, name, resolved),
                 }),
-                this.rangeOf(document, node),
+                range,
             );
         }
 
         // Preserve the old fallback only for call-like function names.
-        if (functionNameNodeAt(tree.rootNode, offset)?.id === node.id || isCallCallee(node)) {
-            return new vscode.Hover(fallbackMarkdown(), this.rangeOf(document, node));
+        if (isCall) {
+            return new vscode.Hover(fallbackMarkdown(), range);
         }
         return undefined;
     }
